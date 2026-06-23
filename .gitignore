@@ -1,0 +1,53 @@
+# ---- Rust / Tauri ----
+/target
+/src-tauri/target
+**/*.rs.bk
+*.pdb
+# Bundled sidecar binaries (PyInstaller output; rebuilt by the packaging step)
+/src-tauri/binaries/
+
+# ---- Node / Next.js ----
+node_modules/
+.next/
+out/
+dist/
+.turbo/
+*.tsbuildinfo
+.eslintcache
+
+# ---- Python sidecar ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+sidecar/build/
+sidecar/dist/
+*.spec
+
+# ---- Data / cache (never commit) ----
+*.db
+*.sqlite
+*.sqlite3
+*.duckdb
+*.parquet
+data/
+cache/
+
+# ---- Env / secrets ----
+.env
+.env.*
+!.env.example
+
+# ---- OS ----
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---- IDE ----
+.idea/
+*.swp
+
+# ---- Logs ----
+*.log
+logs/

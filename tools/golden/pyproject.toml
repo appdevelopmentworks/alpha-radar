@@ -1,0 +1,15 @@
+[project]
+# Test-time only: generates golden-value JSON fixtures for the Rust indicator
+# unit tests (docs/07-testing.md, ADR-13). This is NOT the P0 runtime sidecar.
+#
+# Reference = TA-Lib (the first reference named in ADR-13). pandas-ta 0.3.14b0
+# was yanked from PyPI, so TA-Lib is used as the deterministic numeric basis.
+# ta-lib 0.6.8 ships a cp312 win_amd64 wheel with the C library bundled.
+name = "alpha-radar-golden"
+version = "0.0.0"
+description = "Golden-value fixture generator (TA-Lib reference) for Alpha Radar indicator tests."
+requires-python = "==3.12.*"
+dependencies = [
+    "ta-lib==0.6.8",
+    "pandas==2.2.3",
+]

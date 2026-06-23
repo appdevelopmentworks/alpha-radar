@@ -1,0 +1,12 @@
+[project]
+# Runtime data-fetch sidecar (P0). yfinance wrapper; bundled as a Tauri
+# externalBin via PyInstaller for release (packaging step, TODO). Managed with
+# uv per the project's Python policy.
+name = "alpha-radar-sidecar"
+version = "0.0.0"
+description = "yfinance data-fetch sidecar for Alpha Radar (stateless, fetch-only)."
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "yfinance>=0.2.40",
+    "pandas>=2.0",
+]

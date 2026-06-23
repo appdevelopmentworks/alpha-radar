@@ -1,0 +1,5 @@
+# Pin the Rust toolchain for reproducible builds. Baseline: stable 1.96
+# (the toolchain this project was scaffolded against). Edition is 2021.
+[toolchain]
+channel = "stable"
+components = ["rustfmt", "clippy"]

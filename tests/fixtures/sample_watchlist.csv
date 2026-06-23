@@ -1,0 +1,5 @@
+symbol,name,asset_class,weight
+AAPL,Apple,equity,1.0
+MSFT,Microsoft,equity,1.0
+7974.T,任天堂,equity,1.0
+BTC-USD,Bitcoin,crypto,0.5

@@ -1,0 +1,110 @@
+#!/usr/bin/env python3
+"""Alpha Radar yfinance data-fetch sidecar (P0).
+
+Stateless, fetch-only process. Reads one JSON request from stdin and writes one
+JSON response to stdout, per the docs/04 I/O contract. Failures are returned as
+structured `errors` (never raised), so one bad symbol does not abort the batch.
+Caching / differential update lives on the Rust side (`data/cache.rs`).
+
+Run (dev):  uv run --project sidecar python sidecar/fetch.py
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+import time
+from typing import Any
+
+
+def _err_response(reason: str) -> dict[str, Any]:
+    return {"results": [], "errors": [{"symbol": "*", "interval": "*", "reason": reason}]}
+
+
+def _to_unix(ts) -> int:
+    """Normalize a pandas Timestamp to UTC Unix seconds."""
+    if ts.tzinfo is None:
+        ts = ts.tz_localize("UTC")
+    else:
+        ts = ts.tz_convert("UTC")
+    return int(ts.timestamp())
+
+
+def _fetch_one(yf, pd, item: dict, auto_adjust: bool, retries: int = 3):
+    """Fetch one (symbol, interval). Returns (candles, None) or (None, reason)."""
+    symbol, interval = item["symbol"], item["interval"]
+    start, end = item.get("start"), item.get("end")
+    last_err = None
+    for attempt in range(retries):
+        try:
+            kwargs: dict[str, Any] = {"interval": interval, "auto_adjust": auto_adjust}
+            if start is None:
+                kwargs["period"] = "max"
+            else:
+                kwargs["start"] = pd.to_datetime(start, unit="s", utc=True)
+                if end is not None:
+                    kwargs["end"] = pd.to_datetime(end, unit="s", utc=True)
+            df = yf.Ticker(symbol).history(**kwargs)
+            if df is None or df.empty:
+                return None, "no data / delisted"
+            candles = []
+            has_adj = "Adj Close" in df.columns
+            for idx, row in df.iterrows():
+                close = float(row["Close"])
+                candles.append(
+                    {
+                        "ts": _to_unix(idx),
+                        "open": float(row["Open"]),
+                        "high": float(row["High"]),
+                        "low": float(row["Low"]),
+                        "close": close,
+                        "volume": float(row["Volume"]),
+                        # auto_adjust=True already adjusts Close; mirror it.
+                        "adj_close": float(row["Adj Close"]) if has_adj else close,
+                    }
+                )
+            return candles, None
+        except Exception as e:  # noqa: BLE001 - structured error, never propagate
+            last_err = str(e)
+            time.sleep(2**attempt)  # exponential backoff
+    return None, last_err or "fetch failed"
+
+
+def main() -> None:
+    try:
+        req = json.loads(sys.stdin.read())
+    except Exception as e:  # noqa: BLE001
+        json.dump(_err_response(f"bad request json: {e}"), sys.stdout)
+        return
+
+    auto_adjust = bool(req.get("auto_adjust", True))
+    items = req.get("requests", [])
+
+    try:
+        import pandas as pd
+        import yfinance as yf
+    except Exception as e:  # noqa: BLE001
+        json.dump(_err_response(f"import failed: {e}"), sys.stdout)
+        return
+
+    results, errors = [], []
+    for i, item in enumerate(items):
+        candles, reason = _fetch_one(yf, pd, item, auto_adjust)
+        if reason is not None:
+            errors.append(
+                {"symbol": item["symbol"], "interval": item["interval"], "reason": reason}
+            )
+        else:
+            results.append(
+                {"symbol": item["symbol"], "interval": item["interval"], "candles": candles}
+            )
+        if i + 1 < len(items):
+            time.sleep(0.3)  # throttle between symbols (rate-limit courtesy)
+
+    # NOTE: output="parquet" (large universes) is a planned optimization; this
+    # build always returns inline JSON.
+    json.dump({"results": results, "errors": errors}, sys.stdout)
+
+
+if __name__ == "__main__":
+    main()
