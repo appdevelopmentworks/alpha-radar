@@ -103,7 +103,8 @@ lib/
   - **進捗**: 現状はスキャン中インジケータのみ。`n/N` の逐次進捗は Tauri イベントのストリーミングが必要（将来）。
 - **P6 Chart**（`frontend/app/chart/page.tsx`、`components/MultiPaneChart|MtfSummary`、Rust `commands/get_chart_data`）: lightweight-charts v5 の4ペイン（価格+EMAリボン/Supertrend/一目+BUY/SELLマーカー / MACD 4色ヒスト+線 / Squeeze 4色 / 合成スコア+しきい値線）+ MTF サマリー + 足切替。**全系列は Rust 計算**でリストのスコアと一致（ADR-06）。`attributionLogo` 有効。
   - **ルーティング**: 静的エクスポート（`output: 'export'`）が任意 symbol の動的ルートを生成できないため、`/chart/[symbol]` ではなく **`/chart?symbol=` クエリ方式**（`useSearchParams` + `Suspense`）。
-  - **表示トグル**: チャート上部にチェックボックス（EMAリボン / Supertrend / 一目 / MACD / Squeeze / 売買マーカー）。下段ペイン（MACD/Squeeze）は非表示分を詰めて割り当て（空ペインなし）。既定は一目均衡表 OFF（最も線が多いため）。
+  - **表示トグル**: チャート上部にチェックボックス（EMAリボン / Supertrend / 一目 / MACD / Squeeze / 売買マーカー）。既定は一目均衡表 OFF（最も線が多いため）。**チャート生成（`data` 依存）と表示切替（`visible` 依存）の useEffect を分離**し、トグル時は再生成せず各シリーズの `applyOptions({visible})` のみ — チャートが**リサイズ／再描画されない**。ペインは固定4段構成のため、MACD/Squeeze を OFF にするとそのペインは空のまま残る（リサイズを起こさないための割り切り）。
+  - **初期ウィンドウサイズ**: 1200×900（`tauri.conf.json` の `app.windows[0]`）。
   - スクイーズの on/off ドット行は未実装（val 4色ヒストで代替、将来追加）。
 - **Settings 画面 `/settings`（C）実装済み**（`frontend/app/settings/page.tsx`）: プリセット切替（保守/標準/積極、`get_presets`）+ しきい値（買い/売り/品質ゲート、スライダー）+ MTF（α 日/週/月・週足ゲート・月足修正子・有効化トグル）+ 近接度（`fresh_bars_n`・`approach_floor`・`max_dist_atr`）+ リスク（最小バー数・損切りATR倍率）を編集 → **保存（`update_config`）**。
   - **設定はバックエンドに永続化**（`app_data_dir/config.json`）。`get_config`/`scan_*`/`get_chart_data`/`evaluate_model` は**アクティブ設定をロード**するため、保存した設定がスキャン・チャート双方に一貫適用される（チャートとリストのスコア一致を維持）。フロントは設定を受け渡さない。

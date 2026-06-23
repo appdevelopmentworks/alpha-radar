@@ -28,6 +28,28 @@ const t = (n: number) => n as UTCTimestamp;
 const line = (s: TimeValue[]) => s.map((p) => ({ time: t(p.time), value: p.value }));
 const hist = (s: HistBar[]) => s.map((p) => ({ time: t(p.time), value: p.value, color: p.color }));
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Refs = any;
+
+function applyVisibility(s: Refs, v: ChartVisibility, data: ChartData) {
+  s.ema.forEach((x: Refs) => x.applyOptions({ visible: v.ema }));
+  s.supertrend.applyOptions({ visible: v.supertrend });
+  s.ichimoku.forEach((x: Refs) => x.applyOptions({ visible: v.ichimoku }));
+  s.macd.forEach((x: Refs) => x.applyOptions({ visible: v.macd }));
+  s.squeeze.applyOptions({ visible: v.squeeze });
+  s.markers.setMarkers(
+    v.markers
+      ? data.markers.map((m) => ({
+          time: t(m.time),
+          position: m.position,
+          color: m.color,
+          shape: m.shape,
+          text: m.text,
+        }))
+      : [],
+  );
+}
+
 export function MultiPaneChart({
   data,
   visible,
@@ -36,7 +58,14 @@ export function MultiPaneChart({
   visible: ChartVisibility;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const seriesRef = useRef<Refs>(null);
+  // Latest visibility, read by the (async) chart-creation effect for its
+  // initial state without making `visible` a dependency (which would rebuild).
+  const visibleRef = useRef(visible);
+  visibleRef.current = visible;
 
+  // Create the chart + all series once per `data`. Toggling checkboxes does NOT
+  // run this effect, so it never rebuilds/resizes the chart.
   useEffect(() => {
     const host = ref.current;
     if (!host) return;
@@ -78,7 +107,7 @@ export function MultiPaneChart({
           pane,
         );
 
-      // Pane 0 — price + (optional) overlays + (optional) markers
+      // Pane 0 — price + overlays + markers
       const candle = c.addSeries(
         CandlestickSeries,
         {
@@ -99,52 +128,49 @@ export function MultiPaneChart({
           close: k.close,
         })),
       );
-      if (visible.ema) {
-        addLine(0, "#5b8def").setData(line(data.ema20));
-        addLine(0, "#e0a458").setData(line(data.ema50));
-        addLine(0, "#a36bd8").setData(line(data.ema200));
-      }
-      if (visible.supertrend) {
-        addLine(0, "#3fb950", 2).setData(line(data.supertrend));
-      }
-      if (visible.ichimoku) {
-        addLine(0, "#56c0c0").setData(line(data.tenkan));
-        addLine(0, "#d56b6b").setData(line(data.kijun));
-        addLine(0, "#3a5a40").setData(line(data.senkou_a));
-        addLine(0, "#5a3a3a").setData(line(data.senkou_b));
-      }
-      if (visible.markers) {
-        createSeriesMarkers(
-          candle,
-          data.markers.map((m) => ({
-            time: t(m.time),
-            position: m.position,
-            color: m.color,
-            shape: m.shape,
-            text: m.text,
-          })),
-        );
-      }
+      const ema = [
+        addLine(0, "#5b8def"),
+        addLine(0, "#e0a458"),
+        addLine(0, "#a36bd8"),
+      ];
+      ema[0].setData(line(data.ema20));
+      ema[1].setData(line(data.ema50));
+      ema[2].setData(line(data.ema200));
+      const supertrend = addLine(0, "#3fb950", 2);
+      supertrend.setData(line(data.supertrend));
+      const ichimoku = [
+        addLine(0, "#56c0c0"),
+        addLine(0, "#d56b6b"),
+        addLine(0, "#3a5a40"),
+        addLine(0, "#5a3a3a"),
+      ];
+      ichimoku[0].setData(line(data.tenkan));
+      ichimoku[1].setData(line(data.kijun));
+      ichimoku[2].setData(line(data.senkou_a));
+      ichimoku[3].setData(line(data.senkou_b));
+      const markers = createSeriesMarkers(candle, []);
 
-      // Lower panes are allocated only for what's visible (no empty panes).
-      let pane = 1;
-      if (visible.macd) {
-        const p = pane++;
-        c.addSeries(HistogramSeries, { priceLineVisible: false, lastValueVisible: false }, p).setData(
-          hist(data.macd_hist),
-        );
-        addLine(p, "#e6e8eb").setData(line(data.macd));
-        addLine(p, "#f0a040").setData(line(data.macd_signal));
-      }
-      if (visible.squeeze) {
-        const p = pane++;
-        c.addSeries(HistogramSeries, { priceLineVisible: false, lastValueVisible: false }, p).setData(
-          hist(data.sqz_val),
-        );
-      }
-      // Score pane (the headline signal) is always shown.
-      const scorePane = pane;
-      const score = addLine(scorePane, "#e6e8eb", 2);
+      // Pane 1 — MACD ; Pane 2 — Squeeze ; Pane 3 — score (fixed layout so
+      // toggling never changes the pane structure / triggers a resize).
+      const macdHist = c.addSeries(
+        HistogramSeries,
+        { priceLineVisible: false, lastValueVisible: false },
+        1,
+      );
+      macdHist.setData(hist(data.macd_hist));
+      const macdLine = addLine(1, "#e6e8eb");
+      macdLine.setData(line(data.macd));
+      const macdSignal = addLine(1, "#f0a040");
+      macdSignal.setData(line(data.macd_signal));
+
+      const squeeze = c.addSeries(
+        HistogramSeries,
+        { priceLineVisible: false, lastValueVisible: false },
+        2,
+      );
+      squeeze.setData(hist(data.sqz_val));
+
+      const score = addLine(3, "#e6e8eb", 2);
       score.setData(line(data.score));
       score.createPriceLine({
         price: data.buy_threshold,
@@ -165,13 +191,29 @@ export function MultiPaneChart({
 
       c.panes().forEach((p, i) => p.setHeight(i === 0 ? 340 : 120));
       c.timeScale().fitContent();
+
+      seriesRef.current = {
+        ema,
+        supertrend,
+        ichimoku,
+        macd: [macdHist, macdLine, macdSignal],
+        squeeze,
+        markers,
+      };
+      applyVisibility(seriesRef.current, visibleRef.current, data);
     })();
 
     return () => {
       disposed = true;
+      seriesRef.current = null;
       chart?.remove();
     };
-  }, [data, visible]);
+  }, [data]);
+
+  // Toggle series visibility only — no chart rebuild, no resize.
+  useEffect(() => {
+    if (seriesRef.current) applyVisibility(seriesRef.current, visible, data);
+  }, [visible, data]);
 
   return <div ref={ref} className="chart-host" />;
 }
