@@ -6,12 +6,10 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 
 import { MtfSummary } from "@/components/MtfSummary";
-import {
-  type ChartVisibility,
-  DEFAULT_VISIBILITY,
-  MultiPaneChart,
-} from "@/components/MultiPaneChart";
+import { MultiPaneChart } from "@/components/MultiPaneChart";
+import type { ChartVisibility } from "@/lib/chart-visibility";
 import { getChartData } from "@/lib/invoke";
+import { useScan } from "@/lib/scan-store";
 import type { ChartData, Tf } from "@/lib/types";
 
 // Query-param routing (`/chart?symbol=AAPL`): Next.js static export cannot
@@ -37,7 +35,9 @@ function ChartInner() {
   const [tf, setTf] = useState<Tf>("daily");
   const [data, setData] = useState<ChartData | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [vis, setVis] = useState<ChartVisibility>(DEFAULT_VISIBILITY);
+  // Visibility lives in the cross-navigation store so the checkbox state is
+  // preserved when returning to the radar and reopening a chart.
+  const { chartVisibility: vis, setChartVisibility: setVis } = useScan();
 
   useEffect(() => {
     if (!symbol) return;

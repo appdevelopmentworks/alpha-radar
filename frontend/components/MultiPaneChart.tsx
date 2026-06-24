@@ -4,25 +4,8 @@ import { useEffect, useRef } from "react";
 
 import type { UTCTimestamp } from "lightweight-charts";
 
+import type { ChartVisibility } from "@/lib/chart-visibility";
 import type { ChartData, HistBar, TimeValue } from "@/lib/types";
-
-export interface ChartVisibility {
-  ema: boolean;
-  supertrend: boolean;
-  ichimoku: boolean;
-  macd: boolean;
-  squeeze: boolean;
-  markers: boolean;
-}
-
-export const DEFAULT_VISIBILITY: ChartVisibility = {
-  ema: true,
-  supertrend: true,
-  ichimoku: false, // busiest overlay — hidden by default to declutter
-  macd: true,
-  squeeze: true,
-  markers: true,
-};
 
 const t = (n: number) => n as UTCTimestamp;
 const line = (s: TimeValue[]) => s.map((p) => ({ time: t(p.time), value: p.value }));
