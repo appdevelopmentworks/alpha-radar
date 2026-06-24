@@ -320,6 +320,10 @@ body {
 .toolbar .search {
   min-width: 220px;
 }
+.toolbar .sort-hint {
+  color: var(--muted);
+  font-size: 0.74rem;
+}
 .toolbar .scanned-at {
   margin-left: auto;
   color: var(--muted);
@@ -364,6 +368,21 @@ table.ranking thead th {
   padding: 0.3rem 0.6rem;
   border-bottom: 1px solid var(--line);
   white-space: nowrap;
+}
+table.ranking thead th.sortable {
+  cursor: pointer;
+  user-select: none;
+}
+table.ranking thead th.sortable:hover {
+  color: var(--fg);
+}
+table.ranking thead th.sortable.active {
+  color: var(--fg);
+}
+table.ranking thead th .sort-arrow {
+  display: inline-block;
+  min-width: 0.8em;
+  font-size: 0.7rem;
 }
 table.ranking td {
   padding: 0.45rem 0.6rem;

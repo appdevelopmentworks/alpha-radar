@@ -101,6 +101,7 @@ lib/
   - **入力経路2つ**: ① ティッカー直接入力テキストボックス（カンマ/スペース/改行区切り、`Ctrl+Enter` で実行）→ `scan_symbols` コマンド（`parse_symbols_str` で正規化）。② CSV ドロップ/選択 → `scan_universe`（ファイルパス）。Tauri ネイティブ drag-drop（`onDragDropEvent`＝パス取得）+ `tauri-plugin-dialog` の `open()`。
   - **ナビ保持**: スキャン結果と config を `ScanProvider`（layout の React Context）に保持し、**リスト⇔チャートを行き来しても再スキャン不要**。
   - **進捗**: 現状はスキャン中インジケータのみ。`n/N` の逐次進捗は Tauri イベントのストリーミングが必要（将来）。
+  - **列ヘッダーソート**: 各列ヘッダー（銘柄/状態/近接度/方向スコア/レジーム/経過/ATR/損切り）をクリックで並べ替え。同じ列を再クリックで昇順/降順トグル、アクティブ列に ▲/▼ 表示。数値列は既定降順・銘柄名は昇順、`null` は常に末尾。状態は鮮度ランク（Triggered>Primed>Active>Neutral）、レジームは強度ランク（上昇>下降>レンジ>転換）でソート。ソートは買い/売り/中立の各ブロック内に適用（方向2ブロック構造は維持）。**既定は actionability 降順**（ヘッダーには無い軸＝列クリックで上書き）。`内訳` は単一値でないため非ソート列。旧ソート用ドロップダウンはヘッダーソートに統合し撤去。
 - **P6 Chart**（`frontend/app/chart/page.tsx`、`components/MultiPaneChart|MtfSummary`、Rust `commands/get_chart_data`）: lightweight-charts v5 の4ペイン（価格+EMAリボン/Supertrend/一目+BUY/SELLマーカー / MACD 4色ヒスト+線 / Squeeze 4色 / 合成スコア+しきい値線）+ MTF サマリー + 足切替。**全系列は Rust 計算**でリストのスコアと一致（ADR-06）。`attributionLogo` 有効。
   - **ルーティング**: 静的エクスポート（`output: 'export'`）が任意 symbol の動的ルートを生成できないため、`/chart/[symbol]` ではなく **`/chart?symbol=` クエリ方式**（`useSearchParams` + `Suspense`）。
   - **表示トグル**: チャート上部にチェックボックス（EMAリボン / Supertrend / 一目 / MACD / Squeeze / 売買マーカー）。既定は一目均衡表 OFF（最も線が多いため）。**チャート生成（`data` 依存）と表示切替（`visible` 依存）の useEffect を分離**し、トグル時は再生成せず各シリーズの `applyOptions({visible})` のみ — チャートが**リサイズ／再描画されない**。ペインは固定4段構成のため、MACD/Squeeze を OFF にするとそのペインは空のまま残る（リサイズを起こさないための割り切り）。

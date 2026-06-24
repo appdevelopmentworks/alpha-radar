@@ -7,9 +7,36 @@ import { useRouter } from "next/navigation";
 import { ProximityBar } from "@/components/ProximityBar";
 import { ScoreCell, scoreColor } from "@/components/ScoreCell";
 import { SignalBadge } from "@/components/SignalBadge";
-import type { AssetClass, Regime, SymbolScore } from "@/lib/types";
+import type { AssetClass, Regime, SignalState, SymbolScore } from "@/lib/types";
 
-type SortKey = "actionability" | "proximity_score" | "score_final";
+type SortField =
+  | "actionability" // default ranking (docs/05): timing × conviction; not a visible column
+  | "symbol"
+  | "signal_state"
+  | "proximity_score"
+  | "score_final"
+  | "regime"
+  | "bars_since_trigger"
+  | "atr"
+  | "suggested_stop";
+
+type SortDir = "asc" | "desc";
+interface Sort {
+  field: SortField;
+  dir: SortDir;
+}
+
+const COLUMNS: { key: SortField | null; label: string }[] = [
+  { key: "symbol", label: "銘柄 / 名称" },
+  { key: "signal_state", label: "状態" },
+  { key: "proximity_score", label: "近接度" },
+  { key: "score_final", label: "方向スコア" },
+  { key: "regime", label: "レジーム" },
+  { key: null, label: "内訳" },
+  { key: "bars_since_trigger", label: "経過" },
+  { key: "atr", label: "ATR" },
+  { key: "suggested_stop", label: "損切り" },
+];
 
 const REGIME_LABEL: Record<Regime, string> = {
   TrendUp: "上昇",
@@ -17,6 +44,59 @@ const REGIME_LABEL: Record<Regime, string> = {
   Range: "レンジ",
   Transition: "転換",
 };
+
+// Sort ranks: fresher / stronger states and trends sort higher.
+const STATE_RANK: Record<SignalState, number> = {
+  TriggeredBuy: 3,
+  TriggeredSell: 3,
+  PrimedBuy: 2,
+  PrimedSell: 2,
+  ActiveBuy: 1,
+  ActiveSell: 1,
+  Neutral: 0,
+};
+const REGIME_RANK: Record<Regime, number> = {
+  TrendUp: 3,
+  TrendDown: 2,
+  Range: 1,
+  Transition: 0,
+};
+
+function sortValue(s: SymbolScore, field: SortField): number | string | null {
+  switch (field) {
+    case "actionability":
+      return s.actionability;
+    case "symbol":
+      return s.symbol;
+    case "signal_state":
+      return STATE_RANK[s.signal_state];
+    case "regime":
+      return s.regime ? REGIME_RANK[s.regime] : null;
+    case "proximity_score":
+      return s.proximity_score;
+    case "score_final":
+      return s.score_final;
+    case "bars_since_trigger":
+      return s.bars_since_trigger;
+    case "atr":
+      return s.atr;
+    case "suggested_stop":
+      return s.suggested_stop;
+  }
+}
+
+function makeComparator({ field, dir }: Sort) {
+  const mul = dir === "asc" ? 1 : -1;
+  return (a: SymbolScore, b: SymbolScore) => {
+    const va = sortValue(a, field);
+    const vb = sortValue(b, field);
+    if (va == null && vb == null) return 0;
+    if (va == null) return 1; // nulls always last
+    if (vb == null) return -1;
+    if (typeof va === "string" && typeof vb === "string") return mul * va.localeCompare(vb);
+    return mul * ((va as number) - (vb as number));
+  };
+}
 
 function fmt(n: number | null, digits = 2): string {
   return n == null ? "—" : n.toFixed(digits);
@@ -80,44 +160,58 @@ function Row({ s, onOpen }: { s: SymbolScore; onOpen: (symbol: string) => void }
   );
 }
 
-function Block({
-  title,
-  side,
+function HeaderRow({ sort, onSort }: { sort: Sort; onSort: (f: SortField) => void }) {
+  return (
+    <thead>
+      <tr>
+        {COLUMNS.map((col) =>
+          col.key ? (
+            <th
+              key={col.label}
+              className={`sortable ${sort.field === col.key ? "active" : ""}`}
+              aria-sort={
+                sort.field === col.key
+                  ? sort.dir === "asc"
+                    ? "ascending"
+                    : "descending"
+                  : "none"
+              }
+              onClick={() => onSort(col.key!)}
+            >
+              {col.label}
+              <span className="sort-arrow">
+                {sort.field === col.key ? (sort.dir === "asc" ? " ▲" : " ▼") : ""}
+              </span>
+            </th>
+          ) : (
+            <th key={col.label}>{col.label}</th>
+          ),
+        )}
+      </tr>
+    </thead>
+  );
+}
+
+function Grid({
   rows,
+  sort,
+  onSort,
   onOpen,
 }: {
-  title: string;
-  side: "buy" | "sell";
   rows: SymbolScore[];
+  sort: Sort;
+  onSort: (f: SortField) => void;
   onOpen: (symbol: string) => void;
 }) {
-  if (rows.length === 0) return null;
   return (
-    <section className={`block side-${side}`}>
-      <h2 className="block-title">
-        {title} <span className="count">{rows.length}</span>
-      </h2>
-      <table className="ranking">
-        <thead>
-          <tr>
-            <th>銘柄 / 名称</th>
-            <th>状態</th>
-            <th>近接度</th>
-            <th>方向スコア</th>
-            <th>レジーム</th>
-            <th>内訳</th>
-            <th>経過</th>
-            <th>ATR</th>
-            <th>損切り</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((s) => (
-            <Row key={s.symbol} s={s} onOpen={onOpen} />
-          ))}
-        </tbody>
-      </table>
-    </section>
+    <table className="ranking">
+      <HeaderRow sort={sort} onSort={onSort} />
+      <tbody>
+        {rows.map((s) => (
+          <Row key={s.symbol} s={s} onOpen={onOpen} />
+        ))}
+      </tbody>
+    </table>
   );
 }
 
@@ -129,13 +223,23 @@ export function RankingTable({
   scannedAt: number;
 }) {
   const router = useRouter();
-  const [sortKey, setSortKey] = useState<SortKey>("actionability");
+  // Default: actionability desc (docs/05) — "what can I trade now" stays on top.
+  const [sort, setSort] = useState<Sort>({ field: "actionability", dir: "desc" });
   const [asset, setAsset] = useState<AssetClass | "all">("all");
   const [query, setQuery] = useState("");
   const [showNeutral, setShowNeutral] = useState(false);
 
   const open = (symbol: string) =>
     router.push(`/chart?symbol=${encodeURIComponent(symbol)}`);
+
+  // Click a header: toggle direction if it's the active field, else select it
+  // (numbers default to descending, the symbol name to ascending).
+  const onSort = (field: SortField) =>
+    setSort((cur) =>
+      cur.field === field
+        ? { field, dir: cur.dir === "asc" ? "desc" : "asc" }
+        : { field, dir: field === "symbol" ? "asc" : "desc" },
+    );
 
   const { buys, sells, neutrals } = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -146,14 +250,13 @@ export function RankingTable({
           s.symbol.toLowerCase().includes(q) ||
           (s.name ?? "").toLowerCase().includes(q)),
     );
-    const by = (a: SymbolScore, b: SymbolScore) =>
-      (b[sortKey] ?? -Infinity) - (a[sortKey] ?? -Infinity);
+    const cmp = makeComparator(sort);
     return {
-      buys: filtered.filter((s) => s.direction === "Buy").sort(by),
-      sells: filtered.filter((s) => s.direction === "Sell").sort(by),
-      neutrals: filtered.filter((s) => s.direction === "None").sort(by),
+      buys: filtered.filter((s) => s.direction === "Buy").sort(cmp),
+      sells: filtered.filter((s) => s.direction === "Sell").sort(cmp),
+      neutrals: filtered.filter((s) => s.direction === "None").sort(cmp),
     };
-  }, [scores, asset, query, sortKey]);
+  }, [scores, asset, query, sort]);
 
   return (
     <div className="ranking-wrap">
@@ -169,31 +272,33 @@ export function RankingTable({
           <option value="equity">株式</option>
           <option value="crypto">暗号資産</option>
         </select>
-        <select value={sortKey} onChange={(e) => setSortKey(e.target.value as SortKey)}>
-          <option value="actionability">アクション度順</option>
-          <option value="proximity_score">近接度順</option>
-          <option value="score_final">方向スコア順</option>
-        </select>
+        <span className="sort-hint">列ヘッダーをクリックで並べ替え</span>
         <span className="scanned-at">更新 {relTime(scannedAt)}</span>
       </div>
 
-      <Block title="買い接近" side="buy" rows={buys} onOpen={open} />
-      <Block title="売り接近" side="sell" rows={sells} onOpen={open} />
+      {buys.length > 0 && (
+        <section className="block side-buy">
+          <h2 className="block-title">
+            買い接近 <span className="count">{buys.length}</span>
+          </h2>
+          <Grid rows={buys} sort={sort} onSort={onSort} onOpen={open} />
+        </section>
+      )}
+      {sells.length > 0 && (
+        <section className="block side-sell">
+          <h2 className="block-title">
+            売り接近 <span className="count">{sells.length}</span>
+          </h2>
+          <Grid rows={sells} sort={sort} onSort={onSort} onOpen={open} />
+        </section>
+      )}
 
       {neutrals.length > 0 && (
         <section className="block neutral">
           <button className="neutral-toggle" onClick={() => setShowNeutral((v) => !v)}>
             {showNeutral ? "▼" : "▶"} 中立 <span className="count">{neutrals.length}</span>
           </button>
-          {showNeutral && (
-            <table className="ranking">
-              <tbody>
-                {neutrals.map((s) => (
-                  <Row key={s.symbol} s={s} onOpen={open} />
-                ))}
-              </tbody>
-            </table>
-          )}
+          {showNeutral && <Grid rows={neutrals} sort={sort} onSort={onSort} onOpen={open} />}
         </section>
       )}
 
