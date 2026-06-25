@@ -1,30 +1,15 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 
 import { useRouter } from "next/navigation";
 
 import { ProximityBar } from "@/components/ProximityBar";
 import { ScoreCell, scoreColor } from "@/components/ScoreCell";
 import { SignalBadge } from "@/components/SignalBadge";
+import type { Sort, SortField } from "@/lib/radar-view";
+import { useScan } from "@/lib/scan-store";
 import type { AssetClass, Regime, SignalState, SymbolScore } from "@/lib/types";
-
-type SortField =
-  | "actionability" // default ranking (docs/05): timing × conviction; not a visible column
-  | "symbol"
-  | "signal_state"
-  | "proximity_score"
-  | "score_final"
-  | "regime"
-  | "bars_since_trigger"
-  | "atr"
-  | "suggested_stop";
-
-type SortDir = "asc" | "desc";
-interface Sort {
-  field: SortField;
-  dir: SortDir;
-}
 
 const COLUMNS: { key: SortField | null; label: string }[] = [
   { key: "symbol", label: "銘柄 / 名称" },
@@ -223,11 +208,14 @@ export function RankingTable({
   scannedAt: number;
 }) {
   const router = useRouter();
-  // Default: actionability desc (docs/05) — "what can I trade now" stays on top.
-  const [sort, setSort] = useState<Sort>({ field: "actionability", dir: "desc" });
-  const [asset, setAsset] = useState<AssetClass | "all">("all");
-  const [query, setQuery] = useState("");
-  const [showNeutral, setShowNeutral] = useState(false);
+  // View state (sort + filters) lives in the cross-navigation store so it is
+  // preserved when returning to the radar from the chart.
+  const { radarView, setRadarView } = useScan();
+  const { sort, asset, query, showNeutral } = radarView;
+
+  const setAsset = (asset: AssetClass | "all") => setRadarView((v) => ({ ...v, asset }));
+  const setQuery = (query: string) => setRadarView((v) => ({ ...v, query }));
+  const toggleNeutral = () => setRadarView((v) => ({ ...v, showNeutral: !v.showNeutral }));
 
   const open = (symbol: string) =>
     router.push(`/chart?symbol=${encodeURIComponent(symbol)}`);
@@ -235,11 +223,13 @@ export function RankingTable({
   // Click a header: toggle direction if it's the active field, else select it
   // (numbers default to descending, the symbol name to ascending).
   const onSort = (field: SortField) =>
-    setSort((cur) =>
-      cur.field === field
-        ? { field, dir: cur.dir === "asc" ? "desc" : "asc" }
-        : { field, dir: field === "symbol" ? "asc" : "desc" },
-    );
+    setRadarView((v) => ({
+      ...v,
+      sort:
+        v.sort.field === field
+          ? { field, dir: v.sort.dir === "asc" ? "desc" : "asc" }
+          : { field, dir: field === "symbol" ? "asc" : "desc" },
+    }));
 
   const { buys, sells, neutrals } = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -295,7 +285,7 @@ export function RankingTable({
 
       {neutrals.length > 0 && (
         <section className="block neutral">
-          <button className="neutral-toggle" onClick={() => setShowNeutral((v) => !v)}>
+          <button className="neutral-toggle" onClick={toggleNeutral}>
             {showNeutral ? "▼" : "▶"} 中立 <span className="count">{neutrals.length}</span>
           </button>
           {showNeutral && <Grid rows={neutrals} sort={sort} onSort={onSort} onOpen={open} />}

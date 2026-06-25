@@ -30,5 +30,7 @@ thiserror = "2.0"
 rayon = "1.10"
 # CSV watchlist parsing (P4).
 csv = "1.3"
+# Decode non-UTF-8 watchlist CSVs (Excel on JP Windows saves Shift_JIS/CP932).
+encoding_rs = "0.8"
 # SQLite cache; `bundled` compiles SQLite from source (no system lib needed).
 rusqlite = { version = "0.32", features = ["bundled"] }

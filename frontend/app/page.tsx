@@ -1,14 +1,23 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import Link from "next/link";
+
+import { listen } from "@tauri-apps/api/event";
 
 import { DropZone } from "@/components/DropZone";
 import { RankingTable } from "@/components/RankingTable";
 import { scanSymbols, scanUniverse } from "@/lib/invoke";
 import { useScan } from "@/lib/scan-store";
 import type { ScanResult, SymbolScore } from "@/lib/types";
+
+// Mirrors the Rust `ScanProgress` (commands/mod.rs) emitted on `scan-progress`.
+interface ScanProgress {
+  phase: "fetch" | "load" | "done";
+  done: number;
+  total: number;
+}
 
 const EXPORT_COLS: (keyof SymbolScore)[] = [
   "symbol",
@@ -24,6 +33,31 @@ const EXPORT_COLS: (keyof SymbolScore)[] = [
   "atr",
   "suggested_stop",
 ];
+
+function ScanProgressBar({ progress }: { progress: ScanProgress | null }) {
+  // "load" gives a determinate per-symbol bar; "fetch" (one batched network
+  // call) and the initial state are indeterminate (animated).
+  const determinate = progress?.phase === "load" && progress.total > 0;
+  const pct = determinate ? Math.round((progress.done / progress.total) * 100) : 0;
+  const label = !progress
+    ? "スキャン準備中…"
+    : progress.phase === "fetch"
+      ? `データ取得中…（${progress.total}銘柄）`
+      : progress.phase === "load"
+        ? `スコアリング ${progress.done} / ${progress.total}`
+        : "仕上げ中…";
+  return (
+    <div className="scan-progress" role="status" aria-live="polite">
+      <div className="scan-progress-label">
+        <span>{label}</span>
+        {determinate && <span className="scan-progress-pct">{pct}%</span>}
+      </div>
+      <div className={`progress ${determinate ? "" : "indeterminate"}`}>
+        <div className="progress-fill" style={determinate ? { width: `${pct}%` } : undefined} />
+      </div>
+    </div>
+  );
+}
 
 function csvCell(v: unknown): string {
   if (v == null) return "";
@@ -43,11 +77,21 @@ function download(filename: string, content: string, mime: string) {
 export default function Home() {
   const { result, setResult, lastInput, setLastInput } = useScan();
   const [scanning, setScanning] = useState(false);
+  const [progress, setProgress] = useState<ScanProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [errorsOpen, setErrorsOpen] = useState(false);
 
+  // Subscribe to backend scan-progress events (emitted per symbol while scoring).
+  useEffect(() => {
+    const un = listen<ScanProgress>("scan-progress", (e) => setProgress(e.payload));
+    return () => {
+      un.then((f) => f());
+    };
+  }, []);
+
   async function run(fn: () => Promise<ScanResult>) {
     setError(null);
+    setProgress(null);
     setScanning(true);
     try {
       setResult(await fn());
@@ -55,6 +99,7 @@ export default function Home() {
       setError(String(e));
     } finally {
       setScanning(false);
+      setProgress(null);
     }
   }
 
@@ -124,7 +169,7 @@ export default function Home() {
 
       <DropZone onFile={onFile} disabled={scanning} />
 
-      {scanning && <div className="status scanning">スキャン中…（取得・計算）</div>}
+      {scanning && <ScanProgressBar progress={progress} />}
       {error && <div className="status error">エラー: {error}</div>}
 
       {result && (

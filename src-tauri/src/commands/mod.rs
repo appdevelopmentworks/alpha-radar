@@ -5,7 +5,7 @@
 pub mod chart;
 
 use rayon::prelude::*;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 use crate::config::{Preset, ScanConfig};
 use crate::data::cache::{Cache, FetchDecision};
@@ -19,6 +19,27 @@ use crate::models::{Candle, ChartData, RowError, ScanResult, SymbolScore, Tf};
 use crate::proximity::{actionability, latest_proximity, Direction, SignalState};
 use crate::scoring::composite::category_scores;
 use crate::scoring::direction_score;
+
+/// Scan progress emitted to the frontend via the `scan-progress` event so a
+/// multi-symbol scan can show a progress bar. `phase` is `"fetch"` (network,
+/// one batched call — shown indeterminate) → `"load"` (per-symbol scoring) →
+/// `"done"`.
+#[derive(Clone, serde::Serialize)]
+pub struct ScanProgress {
+    pub phase: String,
+    pub done: usize,
+    pub total: usize,
+}
+
+impl ScanProgress {
+    fn new(phase: &str, done: usize, total: usize) -> Self {
+        Self {
+            phase: phase.to_string(),
+            done,
+            total,
+        }
+    }
+}
 
 /// A symbol's loaded multi-timeframe candles (weekly/monthly may be absent).
 struct SymbolData {
@@ -97,7 +118,11 @@ fn tf_from_interval(s: &str) -> Option<Tf> {
 
 /// Core scan logic (testable without Tauri). `now` is Unix seconds. Per-row
 /// failures are collected; the scan never aborts (docs/01 error policy).
-fn scan_entries(
+// Each argument is a distinct dependency (universe, prior errors, source label,
+// config, cache, sidecar, clock, progress sink); bundling them into a struct
+// would obscure more than it clarifies.
+#[allow(clippy::too_many_arguments)]
+fn scan_entries<F: Fn(ScanProgress)>(
     universe: Vec<UniverseEntry>,
     mut errors: Vec<RowError>,
     source: &str,
@@ -105,7 +130,13 @@ fn scan_entries(
     cache: &mut Cache,
     sidecar: &SidecarClient,
     now: i64,
+    progress: F,
 ) -> AppResult<ScanResult> {
+    let total = universe.len();
+    // Phase 1 is one batched network call (no per-symbol granularity), so the
+    // UI shows it indeterminate; the per-symbol bar advances in the load phase.
+    progress(ScanProgress::new("fetch", 0, total));
+
     // 1. Decide which (symbol, tf) need fetching (differential update, docs/04).
     let mut fetch_items = Vec::new();
     for e in &universe {
@@ -149,7 +180,8 @@ fn scan_entries(
 
     // 3. Load candles into memory (the cache is !Sync; DB stays single-threaded).
     let mut data = Vec::new();
-    for e in &universe {
+    for (idx, e) in universe.iter().enumerate() {
+        progress(ScanProgress::new("load", idx + 1, total));
         let daily = cache.load_candles(&e.symbol, Tf::Daily)?;
         if daily.len() < cfg.min_bars {
             errors.push(RowError {
@@ -185,6 +217,7 @@ fn scan_entries(
     let config_json = serde_json::to_string(cfg)?;
     cache.save_scan_run(now, source, &config_json, universe.len(), errors.len())?;
 
+    progress(ScanProgress::new("done", total, total));
     Ok(ScanResult {
         scores,
         errors,
@@ -201,7 +234,7 @@ pub fn scan_universe_impl(
     now: i64,
 ) -> AppResult<ScanResult> {
     let (universe, errors) = csv::parse_csv_path(csv_path)?;
-    scan_entries(universe, errors, csv_path, cfg, cache, sidecar, now)
+    scan_entries(universe, errors, csv_path, cfg, cache, sidecar, now, |_| {})
 }
 
 /// Scan a free-text ticker list (comma / space / newline separated).
@@ -213,7 +246,7 @@ pub fn scan_symbols_impl(
     now: i64,
 ) -> AppResult<ScanResult> {
     let universe = crate::data::universe::parse_symbols_str(input);
-    scan_entries(universe, Vec::new(), "(symbols)", cfg, cache, sidecar, now)
+    scan_entries(universe, Vec::new(), "(symbols)", cfg, cache, sidecar, now, |_| {})
 }
 
 fn now_unix() -> i64 {
@@ -257,7 +290,11 @@ pub async fn scan_universe(
     tauri::async_runtime::spawn_blocking(move || {
         let mut cache = Cache::open(&cache_path)?;
         let sidecar = SidecarClient::resolve();
-        scan_universe_impl(&csv_path, &cfg, &mut cache, &sidecar, now)
+        let (universe, errors) = csv::parse_csv_path(&csv_path)?;
+        let emit = |p: ScanProgress| {
+            let _ = app.emit("scan-progress", p);
+        };
+        scan_entries(universe, errors, &csv_path, &cfg, &mut cache, &sidecar, now, emit)
     })
     .await
     .map_err(|e| AppError::Sidecar(format!("scan task join: {e}")))?
@@ -274,7 +311,11 @@ pub async fn scan_symbols(app: tauri::AppHandle, symbols: String) -> Result<Scan
     tauri::async_runtime::spawn_blocking(move || {
         let mut cache = Cache::open(&cache_path)?;
         let sidecar = SidecarClient::resolve();
-        scan_symbols_impl(&symbols, &cfg, &mut cache, &sidecar, now)
+        let universe = crate::data::universe::parse_symbols_str(&symbols);
+        let emit = |p: ScanProgress| {
+            let _ = app.emit("scan-progress", p);
+        };
+        scan_entries(universe, Vec::new(), "(symbols)", &cfg, &mut cache, &sidecar, now, emit)
     })
     .await
     .map_err(|e| AppError::Sidecar(format!("scan task join: {e}")))?

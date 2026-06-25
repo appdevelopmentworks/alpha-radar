@@ -99,8 +99,8 @@ lib/
 
 - **P5 Scanner**（`frontend/app/page.tsx`、`components/DropZone|RankingTable|SignalBadge|ProximityBar|ScoreCell`、`lib/invoke.ts|types.ts`）: ドロップ→`scan_universe`→actionability 降順・買い/売り2ブロック・中立折りたたみ・状態バッジ（鮮度3段）・近接度バー・スコア色グラデ・内訳ミニバー・ソート/フィルタ・CSV/JSON エクスポート・エラー集約。
   - **入力経路2つ**: ① ティッカー直接入力テキストボックス（カンマ/スペース/改行区切り、`Ctrl+Enter` で実行）→ `scan_symbols` コマンド（`parse_symbols_str` で正規化）。② CSV ドロップ/選択 → `scan_universe`（ファイルパス）。Tauri ネイティブ drag-drop（`onDragDropEvent`＝パス取得）+ `tauri-plugin-dialog` の `open()`。
-  - **ナビ保持**: スキャン結果と config を `ScanProvider`（layout の React Context）に保持し、**リスト⇔チャートを行き来しても再スキャン不要**。
-  - **進捗**: 現状はスキャン中インジケータのみ。`n/N` の逐次進捗は Tauri イベントのストリーミングが必要（将来）。
+  - **ナビ保持**: スキャン結果・チャート表示トグル・**レーダーのビュー状態（ソート列/方向・資産フィルタ・検索語・中立開閉）**を `ScanProvider`（layout の React Context、`lib/radar-view.ts` に型/既定を定義）に保持。**リスト⇔チャートを行き来しても再スキャン不要**で、チャートから「レーダーへ戻る」してもソート/フィルタが復元される（ページ再マウントで既定に戻らない）。
+  - **進捗**: スキャン中は **Tauri イベント `scan-progress`**（Rust `commands::ScanProgress { phase, done, total }`）を購読してプログレスバー表示。`phase="fetch"`（バッチ1回のネットワーク取得＝不確定アニメーション「データ取得中…」）→ `phase="load"`（銘柄ごとに `done/total` の確定バー「スコアリング n/N」）→ `done`。複数銘柄スキャン時の体感を改善。バッチ取得は粒度が無いため fetch 区間のみ不確定表示（レート制限ガードのためバッチ取得は維持）。
   - **列ヘッダーソート**: 各列ヘッダー（銘柄/状態/近接度/方向スコア/レジーム/経過/ATR/損切り）をクリックで並べ替え。同じ列を再クリックで昇順/降順トグル、アクティブ列に ▲/▼ 表示。数値列は既定降順・銘柄名は昇順、`null` は常に末尾。状態は鮮度ランク（Triggered>Primed>Active>Neutral）、レジームは強度ランク（上昇>下降>レンジ>転換）でソート。ソートは買い/売り/中立の各ブロック内に適用（方向2ブロック構造は維持）。**既定は actionability 降順**（ヘッダーには無い軸＝列クリックで上書き）。`内訳` は単一値でないため非ソート列。旧ソート用ドロップダウンはヘッダーソートに統合し撤去。
 - **P6 Chart**（`frontend/app/chart/page.tsx`、`components/MultiPaneChart|MtfSummary`、Rust `commands/get_chart_data`）: lightweight-charts v5 の4ペイン（価格+EMAリボン/Supertrend/一目+BUY/SELLマーカー / MACD 4色ヒスト+線 / Squeeze 4色 / 合成スコア+しきい値線）+ MTF サマリー + 足切替。**全系列は Rust 計算**でリストのスコアと一致（ADR-06）。`attributionLogo` 有効。
   - **ルーティング**: 静的エクスポート（`output: 'export'`）が任意 symbol の動的ルートを生成できないため、`/chart/[symbol]` ではなく **`/chart?symbol=` クエリ方式**（`useSearchParams` + `Suspense`）。
