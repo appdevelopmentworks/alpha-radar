@@ -35,6 +35,11 @@ export interface SymbolScore {
   actionability: number;
   atr: number | null;
   suggested_stop: number | null;
+  // Historical hit rate (0..1) of the chart-marker rule over the daily
+  // history; null when no marker had a full forward window.
+  marker_hit_rate: number | null;
+  // Number of marker events the hit rate was evaluated on.
+  marker_samples: number;
 }
 
 export interface RowError {
@@ -87,6 +92,10 @@ export interface ScanConfig {
   squeeze_gate: number;
   min_bars: number;
   stop_atr_mult: number;
+  // Chart display only: number of most-recent bars fit in the initial view.
+  chart_bars: number;
+  // Forward window (daily bars) for the marker hit-rate column.
+  marker_horizon_bars: number;
 }
 
 export function directionOf(state: SignalState): Direction {
@@ -153,4 +162,6 @@ export interface ChartData {
   sell_threshold: number;
   markers: ChartMarker[];
   mtf_summary: TfSummary[];
+  // Number of most-recent bars to fit in the initial view (from chart_bars).
+  initial_bars: number;
 }

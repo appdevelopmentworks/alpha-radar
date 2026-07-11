@@ -216,6 +216,29 @@ pub struct ScanConfig {
     pub min_bars: usize,
     /// ATR multiple for the suggested stop distance.
     pub stop_atr_mult: f64,
+    /// Display-only: how many of the most recent bars the chart shows on open
+    /// (a swing view fits ~100–120 bars). Not a computation input — the chart
+    /// still receives the full series and only zooms the initial visible range.
+    /// `#[serde(default)]` keeps configs saved before this field deserializable.
+    #[serde(default = "default_chart_bars")]
+    pub chart_bars: usize,
+    /// Forward window (daily bars) for the radar's marker hit-rate column: a
+    /// marker "hits" when the signed close-to-close return this many bars
+    /// later is positive. Matches the swing holding horizon (eval default).
+    #[serde(default = "default_marker_horizon_bars")]
+    pub marker_horizon_bars: usize,
+}
+
+/// Default initial chart window: ~half a year of daily bars — enough recent
+/// swing structure with a little context (docs/05 chart display).
+fn default_chart_bars() -> usize {
+    120
+}
+
+/// Default marker hit-rate horizon: 10 daily bars ≈ 2 weeks, the same swing
+/// horizon as `EvalConfig::horizon_bars` (docs/07).
+fn default_marker_horizon_bars() -> usize {
+    10
 }
 
 impl Default for ScanConfig {
@@ -231,6 +254,8 @@ impl Default for ScanConfig {
             squeeze_gate: 0.8,
             min_bars: 60,
             stop_atr_mult: 2.0,
+            chart_bars: default_chart_bars(),
+            marker_horizon_bars: default_marker_horizon_bars(),
         }
     }
 }

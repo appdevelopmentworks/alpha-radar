@@ -15,10 +15,11 @@ use crate::data::universe::UniverseEntry;
 use crate::error::{AppError, AppResult};
 use crate::eval::{evaluate, EvalConfig, EvalReport};
 use crate::indicators::atr;
+use crate::indicators::trend::supertrend;
 use crate::models::{Candle, ChartData, RowError, ScanResult, SymbolScore, Tf};
 use crate::proximity::{actionability, latest_proximity, Direction, SignalState};
-use crate::scoring::composite::category_scores;
-use crate::scoring::direction_score;
+use crate::scoring::composite::{category_scores, single_tf_score};
+use crate::scoring::{direction_score, marker_events, marker_hit_rate};
 
 /// Scan progress emitted to the frontend via the `scan-progress` event so a
 /// multi-symbol scan can show a progress bar. `phase` is `"fetch"` (network,
@@ -73,6 +74,19 @@ fn assemble_symbol_score(d: &SymbolData, cfg: &ScanConfig) -> SymbolScore {
         .copied()
         .flatten();
 
+    // Marker hit rate: backtest the FR-8 chart-marker rule over the full daily
+    // history (same `marker_events` the chart renders — ADR-14).
+    let st = supertrend(
+        &high,
+        &low,
+        &close,
+        cfg.indicators.supertrend_atr,
+        cfg.indicators.supertrend_mult,
+    );
+    let score_series = single_tf_score(&d.daily, cfg);
+    let events = marker_events(&score_series, &st.dir, cfg.buy_threshold, cfg.sell_threshold);
+    let (hit_rate, samples) = marker_hit_rate(&close, &events, cfg.marker_horizon_bars);
+
     let (state, proximity_score, bars_since) = match latest_proximity(&d.daily, cfg) {
         Some(p) => (p.state, p.proximity_score, p.bars_since_trigger),
         None => (SignalState::Neutral, 0.0, None),
@@ -105,6 +119,8 @@ fn assemble_symbol_score(d: &SymbolData, cfg: &ScanConfig) -> SymbolScore {
         actionability: action,
         atr: atr_last,
         suggested_stop: stop,
+        marker_hit_rate: hit_rate,
+        marker_samples: samples,
     }
 }
 

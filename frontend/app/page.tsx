@@ -29,6 +29,8 @@ const EXPORT_COLS: (keyof SymbolScore)[] = [
   "proximity_score",
   "actionability",
   "score_final",
+  "marker_hit_rate",
+  "marker_samples",
   "bars_since_trigger",
   "atr",
   "suggested_stop",

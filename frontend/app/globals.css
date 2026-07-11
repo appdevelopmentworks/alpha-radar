@@ -461,6 +461,10 @@ td.num {
   font-family: var(--mono);
   font-variant-numeric: tabular-nums;
 }
+.hit-n {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
 
 /* ---------- Signal badge ---------- */
 .badge {

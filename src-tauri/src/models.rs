@@ -137,6 +137,12 @@ pub struct SymbolScore {
     pub actionability: f64,
     pub atr: Option<f64>,
     pub suggested_stop: Option<f64>,
+    /// Historical hit rate ∈ [0,1] of the FR-8 marker rule over this symbol's
+    /// daily history (signed forward return over `marker_horizon_bars` > 0).
+    /// `None` when no marker has a full forward window.
+    pub marker_hit_rate: Option<f64>,
+    /// Number of marker events the hit rate was evaluated on.
+    pub marker_samples: u32,
 }
 
 /// Result of a universe scan returned across the Tauri boundary (docs/01).
@@ -205,4 +211,7 @@ pub struct ChartData {
     pub sell_threshold: f64,
     pub markers: Vec<ChartMarker>,
     pub mtf_summary: Vec<TfSummary>,
+    /// Display-only: how many of the most recent bars to fit in the initial
+    /// view (from `ScanConfig::chart_bars`). The full series is still sent.
+    pub initial_bars: usize,
 }

@@ -16,6 +16,7 @@ const COLUMNS: { key: SortField | null; label: string }[] = [
   { key: "signal_state", label: "状態" },
   { key: "proximity_score", label: "近接度" },
   { key: "score_final", label: "方向スコア" },
+  { key: "marker_hit_rate", label: "的中率" },
   { key: "regime", label: "レジーム" },
   { key: null, label: "内訳" },
   { key: "bars_since_trigger", label: "経過" },
@@ -61,6 +62,8 @@ function sortValue(s: SymbolScore, field: SortField): number | string | null {
       return s.proximity_score;
     case "score_final":
       return s.score_final;
+    case "marker_hit_rate":
+      return s.marker_hit_rate;
     case "bars_since_trigger":
       return s.bars_since_trigger;
     case "atr":
@@ -85,6 +88,22 @@ function makeComparator({ field, dir }: Sort) {
 
 function fmt(n: number | null, digits = 2): string {
   return n == null ? "—" : n.toFixed(digits);
+}
+
+// Marker hit rate as "56% (42)"; sample count shown so a thin history (few
+// supertrend legs) is visibly less trustworthy than a deep one.
+function HitRateCell({ s }: { s: SymbolScore }) {
+  if (s.marker_hit_rate == null) return <td className="num">—</td>;
+  const pct = s.marker_hit_rate * 100;
+  return (
+    <td
+      className="num"
+      title={`マーカー ${s.marker_samples} 回のうち ${Math.round((pct / 100) * s.marker_samples)} 回順行（設定のバー数後の終値で判定）`}
+    >
+      {pct.toFixed(0)}%
+      <span className="hit-n"> ({s.marker_samples})</span>
+    </td>
+  );
 }
 
 function relTime(unixSec: number): string {
@@ -134,6 +153,7 @@ function Row({ s, onOpen }: { s: SymbolScore; onOpen: (symbol: string) => void }
       <td className="cell-score">
         <ScoreCell value={s.score_final} />
       </td>
+      <HitRateCell s={s} />
       <td className="cell-regime">{s.regime ? REGIME_LABEL[s.regime] : "—"}</td>
       <td>
         <MiniBreakdown s={s} />

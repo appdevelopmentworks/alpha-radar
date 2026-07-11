@@ -176,6 +176,14 @@ export default function SettingsPage() {
         <h2>リスク / 対象</h2>
         <Num label="最小バー数" value={cfg.min_bars} onChange={(v) => patch({ min_bars: Math.round(v) })} min={20} max={250} step={5} />
         <Num label="損切り ATR 倍率" value={cfg.stop_atr_mult} onChange={(v) => patch({ stop_atr_mult: v })} min={0.5} max={5} step={0.1} slider />
+        <Num label="的中率の判定バー数" value={cfg.marker_horizon_bars} onChange={(v) => patch({ marker_horizon_bars: Math.round(v) })} min={3} max={60} step={1} />
+        <p className="hint">売買マーカーの何営業日後の終値で的中（順行）を判定するか。ランキングの「的中率」列に反映されます。</p>
+      </section>
+
+      <section className="settings-section">
+        <h2>チャート表示</h2>
+        <Num label="初期表示ローソク足数" value={cfg.chart_bars} onChange={(v) => patch({ chart_bars: Math.round(v) })} min={30} max={400} step={10} slider />
+        <p className="hint">チャートを開いたときに直近から何本のローソク足を表示するか（スイング目安 100 前後）。足数より少ない銘柄は全体を表示します。</p>
       </section>
 
       <div className="settings-actions">

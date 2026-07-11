@@ -11,6 +11,7 @@ export type SortField =
   | "proximity_score"
   | "score_final"
   | "regime"
+  | "marker_hit_rate"
   | "bars_since_trigger"
   | "atr"
   | "suggested_stop";

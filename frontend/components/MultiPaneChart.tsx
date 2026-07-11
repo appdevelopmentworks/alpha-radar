@@ -173,7 +173,19 @@ export function MultiPaneChart({
       });
 
       c.panes().forEach((p, i) => p.setHeight(i === 0 ? 340 : 120));
-      c.timeScale().fitContent();
+      // Initial zoom: show only the most recent `initial_bars` candles (a swing
+      // view fits ~100), keeping the chart's right offset as breathing room.
+      // Fall back to fitting everything when there are fewer bars than that.
+      const bars = data.ohlc.length;
+      const n = data.initial_bars;
+      const ts = c.timeScale();
+      if (n > 0 && bars > n) {
+        // `to` runs a few bars past the last index to keep the same right-edge
+        // whitespace as `rightOffset` (the newest candle isn't flush-right).
+        ts.setVisibleLogicalRange({ from: bars - n, to: bars - 1 + 4 });
+      } else {
+        ts.fitContent();
+      }
 
       seriesRef.current = {
         ema,

@@ -50,6 +50,71 @@ fn latest_regime(candles: &[Candle], cfg: &ScanConfig) -> Option<Regime> {
         .flatten()
 }
 
+/// BUY/SELL marker events (docs/00 FR-8, ADR-14): at most one per Supertrend
+/// leg, on the first bar whose score confirms the leg's direction at threshold
+/// strength (score ≥ `buy` in an up leg / ≤ `sell` in a down leg). Returns
+/// `(bar index, direction +1/-1)`. Shared by the chart markers and the
+/// per-symbol marker hit-rate stat so both always agree.
+pub fn marker_events(
+    score: &[Option<f64>],
+    st_dir: &[Option<i8>],
+    buy: f64,
+    sell: f64,
+) -> Vec<(usize, i8)> {
+    let mut out = Vec::new();
+    let mut leg_done = false;
+    let mut prev_dir: Option<i8> = None;
+    for i in 0..score.len().min(st_dir.len()) {
+        let Some(d) = st_dir[i] else {
+            continue;
+        };
+        if prev_dir != Some(d) {
+            leg_done = false; // a new leg re-arms the (single) marker
+        }
+        prev_dir = Some(d);
+        if leg_done {
+            continue;
+        }
+        let Some(s) = score[i] else {
+            continue;
+        };
+        let confirmed = if d > 0 { s >= buy } else { s <= sell };
+        if confirmed {
+            leg_done = true;
+            out.push((i, d));
+        }
+    }
+    out
+}
+
+/// Historical hit rate of the marker events over `close`: a hit is a positive
+/// signed close-to-close return `horizon` bars after the marker. Returns
+/// `(hit rate ∈ [0,1], evaluated sample count)`; the rate is `None` when no
+/// marker has a full forward window.
+pub fn marker_hit_rate(
+    close: &[f64],
+    events: &[(usize, i8)],
+    horizon: usize,
+) -> (Option<f64>, u32) {
+    let n = close.len();
+    let mut hits = 0u32;
+    let mut total = 0u32;
+    for &(i, dir) in events {
+        if i + horizon >= n || close[i] <= 0.0 {
+            continue;
+        }
+        total += 1;
+        if (close[i + horizon] - close[i]) * dir as f64 > 0.0 {
+            hits += 1;
+        }
+    }
+    if total == 0 {
+        (None, 0)
+    } else {
+        (Some(hits as f64 / total as f64), total)
+    }
+}
+
 /// Compute the full multi-timeframe direction score for a symbol. `weekly` /
 /// `monthly` are optional — a symbol missing them degrades via the MTF gates
 /// (docs/03 §5, ADR-09).
@@ -149,5 +214,40 @@ mod tests {
         let cfg = ScanConfig::default();
         let candles = range_candles(260);
         assert_eq!(latest_regime(&candles, &cfg), Some(Regime::Range));
+    }
+
+    #[test]
+    fn marker_events_one_per_leg() {
+        // Up leg confirms at bar 2 (first ≥ +40); wobble below/above the
+        // threshold within the same leg must not re-fire. Down leg from bar 5
+        // confirms immediately.
+        let score = [
+            Some(10.0),
+            Some(30.0),
+            Some(45.0),
+            Some(30.0),
+            Some(50.0),
+            Some(-60.0),
+        ];
+        let dir = [Some(1), Some(1), Some(1), Some(1), Some(1), Some(-1)];
+        assert_eq!(marker_events(&score, &dir, 40.0, -40.0), vec![(2, 1), (5, -1)]);
+    }
+
+    #[test]
+    fn marker_hit_rate_counts_only_full_windows() {
+        // close: marker at 0 (buy) → +1 after 2 bars = hit; marker at 2 (sell)
+        // → price rises = miss; marker at 4 has no full window → not counted.
+        let close = [100.0, 101.0, 102.0, 103.0, 104.0, 105.0];
+        let events = [(0usize, 1i8), (2, -1), (4, 1)];
+        let (rate, n) = marker_hit_rate(&close, &events, 2);
+        assert_eq!(n, 2);
+        assert!((rate.unwrap() - 0.5).abs() < 1e-12);
+    }
+
+    #[test]
+    fn marker_hit_rate_empty_is_none() {
+        assert_eq!(marker_hit_rate(&[100.0, 101.0], &[], 10), (None, 0));
+        // An event without a full forward window is excluded entirely.
+        assert_eq!(marker_hit_rate(&[100.0, 101.0], &[(0, 1)], 10), (None, 0));
     }
 }

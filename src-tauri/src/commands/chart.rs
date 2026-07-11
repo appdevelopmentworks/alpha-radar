@@ -74,38 +74,45 @@ fn four_color_hist(ts: &[i64], series: &[Option<f64>], c: &FourColor) -> Vec<His
     out
 }
 
-/// BUY/SELL markers where the (single-TF) score crosses the thresholds.
-fn markers_from_score(
+/// BUY/SELL markers: at most one per Supertrend leg, placed on the first bar
+/// whose composite score confirms the leg's direction at threshold strength
+/// (score ≥ buy in an up leg / ≤ sell in a down leg). The trailing-stop leg is
+/// the direction axis and the score is the entry trigger — a raw threshold
+/// cross re-fires on every score wobble (cluttered, counter-trend markers),
+/// while a raw flip has no edge; the leg×score confluence keeps the flip-
+/// anchored timing with the score's precision (ADR-14, docs/00 FR-8). The
+/// event rule lives in `scoring::marker_events` so the radar's hit-rate column
+/// is computed from exactly these markers.
+fn confluence_markers(
     ts: &[i64],
     close: &[f64],
     score: &[Option<f64>],
+    st_dir: &[Option<i8>],
     buy: f64,
     sell: f64,
 ) -> Vec<ChartMarker> {
-    let mut out = Vec::new();
-    for i in 1..score.len() {
-        let (Some(s), Some(p)) = (score[i], score[i - 1]) else {
-            continue;
-        };
-        if p < buy && s >= buy {
-            out.push(ChartMarker {
-                time: ts[i],
-                position: "belowBar".into(),
-                color: "#26a69a".into(),
-                shape: "arrowUp".into(),
-                text: format!("BUY @ {:.2}", close[i]),
-            });
-        } else if p > sell && s <= sell {
-            out.push(ChartMarker {
-                time: ts[i],
-                position: "aboveBar".into(),
-                color: "#ef5350".into(),
-                shape: "arrowDown".into(),
-                text: format!("SELL @ {:.2}", close[i]),
-            });
-        }
-    }
-    out
+    crate::scoring::marker_events(score, st_dir, buy, sell)
+        .into_iter()
+        .map(|(i, d)| {
+            if d > 0 {
+                ChartMarker {
+                    time: ts[i],
+                    position: "belowBar".into(),
+                    color: "#26a69a".into(),
+                    shape: "arrowUp".into(),
+                    text: format!("BUY @ {:.2}", close[i]),
+                }
+            } else {
+                ChartMarker {
+                    time: ts[i],
+                    position: "aboveBar".into(),
+                    color: "#ef5350".into(),
+                    shape: "arrowDown".into(),
+                    text: format!("SELL @ {:.2}", close[i]),
+                }
+            }
+        })
+        .collect()
 }
 
 /// Conviction velocity from the tail of the score series.
@@ -209,14 +216,16 @@ pub fn build_chart_data(
         score: tv(&ts, &score_series),
         buy_threshold: cfg.buy_threshold,
         sell_threshold: cfg.sell_threshold,
-        markers: markers_from_score(
+        markers: confluence_markers(
             &ts,
             &close,
             &score_series,
+            &st.dir,
             cfg.buy_threshold,
             cfg.sell_threshold,
         ),
         mtf_summary: mtf_summary(cache, symbol, cfg)?,
+        initial_bars: cfg.chart_bars,
         ohlc: candles,
     })
 }
@@ -225,6 +234,77 @@ pub fn build_chart_data(
 mod tests {
     use super::*;
     use crate::models::Candle;
+
+    /// Crafted-case harness for `confluence_markers`: bar timestamps are the
+    /// indices, closes are 100.0, thresholds ±40.
+    fn markers(score: &[Option<f64>], dir: &[Option<i8>]) -> Vec<ChartMarker> {
+        let n = score.len();
+        let ts: Vec<i64> = (0..n as i64).collect();
+        let close = vec![100.0; n];
+        confluence_markers(&ts, &close, score, dir, 40.0, -40.0)
+    }
+
+    #[test]
+    fn one_marker_per_leg_at_first_confirmation() {
+        // Up leg from bar 0; score reaches the buy threshold at bar 2 and stays
+        // above — exactly one BUY at bar 2, no re-fire on later bars.
+        let score = [Some(10.0), Some(30.0), Some(45.0), Some(50.0), Some(60.0)];
+        let dir = [Some(1); 5];
+        let m = markers(&score, &dir);
+        assert_eq!(m.len(), 1);
+        assert_eq!(m[0].time, 2);
+        assert_eq!(m[0].shape, "arrowUp");
+    }
+
+    #[test]
+    fn marker_at_flip_bar_when_score_already_confirms() {
+        // Score is already past the buy threshold when the leg flips up at
+        // bar 2 → the marker lands on the flip bar itself.
+        let score = [Some(50.0); 5];
+        let dir = [Some(-1), Some(-1), Some(1), Some(1), Some(1)];
+        let m = markers(&score, &dir);
+        assert_eq!(m.len(), 1);
+        assert_eq!(m[0].time, 2);
+    }
+
+    #[test]
+    fn unconfirmed_leg_yields_no_marker_and_next_leg_rearms() {
+        // Up leg (bars 0-2) never reaches +40 → silent. Down leg (bars 3-5)
+        // confirms at bar 4 → one SELL.
+        let score = [
+            Some(10.0),
+            Some(20.0),
+            Some(30.0),
+            Some(-20.0),
+            Some(-45.0),
+            Some(-60.0),
+        ];
+        let dir = [Some(1), Some(1), Some(1), Some(-1), Some(-1), Some(-1)];
+        let m = markers(&score, &dir);
+        assert_eq!(m.len(), 1);
+        assert_eq!(m[0].time, 4);
+        assert_eq!(m[0].shape, "arrowDown");
+        assert_eq!(m[0].position, "aboveBar");
+    }
+
+    #[test]
+    fn score_wobble_across_threshold_does_not_refire_within_leg() {
+        // The old rule fired on every re-cross; the leg rule must not.
+        let score = [Some(45.0), Some(30.0), Some(45.0), Some(30.0), Some(45.0)];
+        let dir = [Some(1); 5];
+        let m = markers(&score, &dir);
+        assert_eq!(m.len(), 1);
+        assert_eq!(m[0].time, 0);
+    }
+
+    #[test]
+    fn warmup_nones_are_skipped() {
+        let score = [None, None, Some(50.0)];
+        let dir = [None, Some(1), Some(1)];
+        let m = markers(&score, &dir);
+        assert_eq!(m.len(), 1);
+        assert_eq!(m[0].time, 2);
+    }
 
     #[test]
     fn chart_data_matches_single_tf_score() {
