@@ -23,6 +23,21 @@ pub struct IndicatorParams {
     pub supertrend_mult: f64,
     pub ichimoku: [usize; 3],
     pub ichimoku_displacement: usize,
+    /// Q-Trend (chart display layer, ADR-15): ratcheting trend line over the
+    /// `qtrend_period` close range, band width `qtrend_mult × ATR(qtrend_atr)`.
+    /// Field-level serde defaults keep configs saved before these fields
+    /// deserializable (`load_active_config` would silently fall back to the
+    /// Standard preset otherwise).
+    #[serde(default = "default_qtrend_period")]
+    pub qtrend_period: usize,
+    #[serde(default = "default_qtrend_atr")]
+    pub qtrend_atr: usize,
+    #[serde(default = "default_qtrend_mult")]
+    pub qtrend_mult: f64,
+    /// Precursor: fire when close is within this fraction of ATR of the
+    /// pending flip threshold while moving toward it (ADR-15).
+    #[serde(default = "default_qtrend_precursor_atr")]
+    pub qtrend_precursor_atr: f64,
     // momentum
     pub macd_fast: usize,
     pub macd_slow: usize,
@@ -62,6 +77,10 @@ impl Default for IndicatorParams {
             supertrend_mult: 3.0,
             ichimoku: [9, 26, 52],
             ichimoku_displacement: 26,
+            qtrend_period: default_qtrend_period(),
+            qtrend_atr: default_qtrend_atr(),
+            qtrend_mult: default_qtrend_mult(),
+            qtrend_precursor_atr: default_qtrend_precursor_atr(),
             macd_fast: 12,
             macd_slow: 26,
             macd_signal: 9,
@@ -85,6 +104,23 @@ impl Default for IndicatorParams {
             choppiness_period: 14,
         }
     }
+}
+
+/// Q-Trend defaults match the TradingView script's stock settings
+/// (close / 200 / ATR 14 / mult 1.0, Type A) so marker timing lines up with
+/// the reference chart.
+fn default_qtrend_period() -> usize {
+    200
+}
+fn default_qtrend_atr() -> usize {
+    14
+}
+fn default_qtrend_mult() -> f64 {
+    1.0
+}
+/// Precursor default: within half an ATR of the pending flip threshold.
+fn default_qtrend_precursor_atr() -> f64 {
+    0.5
 }
 
 /// Regime-dependent category weights (docs/03 §3). Columns are indexed by

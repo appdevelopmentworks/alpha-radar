@@ -86,6 +86,9 @@ P5 — 近接度ランキング画面（`frontend/`、docs/05、主画面 `/`）
 P6 — マルチペインチャート（`frontend/`、lightweight-charts v5、docs/05、`/chart?symbol=`）:
 - Rust `commands/get_chart_data`: OHLC + EMAリボン/Supertrend/一目 + MACD(4色ヒスト) + Squeeze(4色) + 合成スコア(しきい値線) + BUY/SELL マーカー + MTF サマリーを**全て Rust 計算**（チャートとリストのスコアが完全一致＝再計算しない）
 - `MultiPaneChart`（価格/MACD/Squeeze/スコアの4ペイン・`attributionLogo` 有効）・`MtfSummary`・足切替
+- **Q-Trend レイヤー（ADR-15）**: ラチェット式トレンドライン + QT BUY/SELL/STRONG フリップマーカー + `QT前兆` サークル（フリップ閾値まで 0.5 ATR 以内・同方向モメンタムで先行検出）。既存確定マーカーと独立トグルで併存。検証結果: フリップ当日 PF 0.99 / 前兆 PF 0.91 = ランキング組込みは見送り（表示専用、ADR-15）
+- **STフリップ（ADR-16）**: Supertrend フリップの `ST LONG/SHORT` マーカー（ATS 視覚比較用・単独エッジ実測なし・既定 OFF）。「スコア」トグル・動的ペイン（OFF で収縮）・ウインドウ追従レイアウトも同 ADR
+- **レーダー「直近マーカー」列**: 確定/QT/前兆の全種から最新1件をバッジ+経過日数で表示、経過でソート可
 - ※静的エクスポート制約により動的ルートではなく `?symbol=` クエリ方式
 
 P7 — 評価ハーネス（`eval/`、`commands/evaluate_model`、docs/07、ADR: P8 より前に必須）:

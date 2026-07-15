@@ -12,7 +12,7 @@ use alpha_radar_lib::indicators::mean_reversion::{
     connors_rsi2, ma_zscore, percent_b_default, williams_r,
 };
 use alpha_radar_lib::indicators::momentum::{macd, squeeze_momentum, tsi};
-use alpha_radar_lib::indicators::trend::{adx_dmi, ichimoku, supertrend};
+use alpha_radar_lib::indicators::trend::{adx_dmi, ichimoku, qtrend, supertrend};
 use alpha_radar_lib::indicators::volatility::{bb_width, bollinger, choppiness, keltner};
 use alpha_radar_lib::indicators::{atr, ema, linreg, rsi, sma};
 use serde::Deserialize;
@@ -36,6 +36,16 @@ struct Golden {
     adx_14: Vec<Option<f64>>,
     st_line: Vec<Option<f64>>,
     st_dir: Vec<Option<i64>>,
+    // Q-Trend: p=50 primary (many flips on the 220-bar fixture), p=200
+    // secondary (production default; pins the seed convention).
+    qt_line_50: Vec<Option<f64>>,
+    qt_dir_50: Vec<Option<i64>>,
+    qt_flip_50: Vec<Option<i64>>,
+    qt_strong_50: Vec<i64>,
+    qt_dist_50: Vec<Option<f64>>,
+    qt_line_200: Vec<Option<f64>>,
+    qt_dir_200: Vec<Option<i64>>,
+    qt_flip_200: Vec<Option<i64>>,
     ichi_tenkan: Vec<Option<f64>>,
     ichi_kijun: Vec<Option<f64>>,
     ichi_senkou_a: Vec<Option<f64>>,
@@ -65,6 +75,7 @@ struct Golden {
 }
 
 struct Ohlcv {
+    open: Vec<f64>,
     high: Vec<f64>,
     low: Vec<f64>,
     close: Vec<f64>,
@@ -78,15 +89,21 @@ fn load_csv() -> Ohlcv {
     let path = fixtures_dir().join("sample_basic_1d.csv");
     let text =
         std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
-    let (mut high, mut low, mut close) = (Vec::new(), Vec::new(), Vec::new());
+    let (mut open, mut high, mut low, mut close) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
     // Header: ts,open,high,low,close,volume
     for line in text.lines().skip(1).filter(|l| !l.trim().is_empty()) {
         let cols: Vec<&str> = line.split(',').collect();
+        open.push(cols[1].parse().expect("parse open"));
         high.push(cols[2].parse().expect("parse high"));
         low.push(cols[3].parse().expect("parse low"));
         close.push(cols[4].parse().expect("parse close"));
     }
-    Ohlcv { high, low, close }
+    Ohlcv {
+        open,
+        high,
+        low,
+        close,
+    }
 }
 
 fn load_golden() -> Golden {
@@ -168,6 +185,28 @@ fn trend_match_talib_golden() {
     assert_series_close(&ich.kijun, &g.ichi_kijun, "ichi_kijun");
     assert_series_close(&ich.senkou_a, &g.ichi_senkou_a, "ichi_senkou_a");
     assert_series_close(&ich.senkou_b, &g.ichi_senkou_b, "ichi_senkou_b");
+}
+
+#[test]
+fn qtrend_matches_golden() {
+    let d = load_csv();
+    let g = load_golden();
+
+    let qt = qtrend(&d.open, &d.high, &d.low, &d.close, 50, 14, 1.0);
+    assert_series_close(&qt.line, &g.qt_line_50, "qt_line_50");
+    assert_dir_eq(&qt.dir, &g.qt_dir_50, "qt_dir_50");
+    assert_dir_eq(&qt.flip, &g.qt_flip_50, "qt_flip_50");
+    assert_series_close(&qt.dist_flip_atr, &g.qt_dist_50, "qt_dist_50");
+    for (i, (got, want)) in qt.strong.iter().zip(g.qt_strong_50.iter()).enumerate() {
+        assert_eq!(i64::from(*got), *want, "qt_strong_50[{i}]");
+    }
+
+    // Production default p=200: pins the seed convention (first flip lands on
+    // the seed bar itself in this fixture).
+    let qt200 = qtrend(&d.open, &d.high, &d.low, &d.close, 200, 14, 1.0);
+    assert_series_close(&qt200.line, &g.qt_line_200, "qt_line_200");
+    assert_dir_eq(&qt200.dir, &g.qt_dir_200, "qt_dir_200");
+    assert_dir_eq(&qt200.flip, &g.qt_flip_200, "qt_flip_200");
 }
 
 #[test]

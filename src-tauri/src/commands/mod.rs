@@ -15,8 +15,10 @@ use crate::data::universe::UniverseEntry;
 use crate::error::{AppError, AppResult};
 use crate::eval::{evaluate, EvalConfig, EvalReport};
 use crate::indicators::atr;
-use crate::indicators::trend::supertrend;
-use crate::models::{Candle, ChartData, RowError, ScanResult, SymbolScore, Tf};
+use crate::indicators::trend::{qtrend, qtrend_precursors, supertrend};
+use crate::models::{
+    Candle, ChartData, LastMarker, MarkerKind, RowError, ScanResult, SymbolScore, Tf,
+};
 use crate::proximity::{actionability, latest_proximity, Direction, SignalState};
 use crate::scoring::composite::{category_scores, single_tf_score};
 use crate::scoring::{direction_score, marker_events, marker_hit_rate};
@@ -60,6 +62,34 @@ fn suggested_stop(close: Option<f64>, atr: Option<f64>, dir: Direction, mult: f6
     }
 }
 
+/// Most recent event across the three marker sources (each list ascending by
+/// bar index). Ties on the same bar resolve by signal strength:
+/// Confluence > QtFlip > QtPrecursor.
+fn latest_marker(
+    confluence: &[(usize, i8)],
+    qt_flips: &[(usize, i8)],
+    qt_precursors: &[(usize, i8)],
+    last_bar: usize,
+) -> Option<LastMarker> {
+    let candidates = [
+        (MarkerKind::Confluence, confluence.last()),
+        (MarkerKind::QtFlip, qt_flips.last()),
+        (MarkerKind::QtPrecursor, qt_precursors.last()),
+    ];
+    // kind_priority: earlier in `candidates` wins ties, so compare by
+    // (bar, reverse position) via max_by_key over (bar, -index) semantics.
+    candidates
+        .iter()
+        .enumerate()
+        .filter_map(|(pri, (kind, ev))| ev.map(|&(i, dir)| (i, std::cmp::Reverse(pri), *kind, dir)))
+        .max_by_key(|&(i, rev_pri, _, _)| (i, rev_pri))
+        .map(|(i, _, kind, dir)| LastMarker {
+            kind,
+            dir,
+            bars_ago: last_bar.saturating_sub(i) as u32,
+        })
+}
+
 /// Assemble both axes (direction + proximity) plus risk fields into a
 /// `SymbolScore`. Pure — safe to run across rayon threads.
 fn assemble_symbol_score(d: &SymbolData, cfg: &ScanConfig) -> SymbolScore {
@@ -86,6 +116,27 @@ fn assemble_symbol_score(d: &SymbolData, cfg: &ScanConfig) -> SymbolScore {
     let score_series = single_tf_score(&d.daily, cfg);
     let events = marker_events(&score_series, &st.dir, cfg.buy_threshold, cfg.sell_threshold);
     let (hit_rate, samples) = marker_hit_rate(&close, &events, cfg.marker_horizon_bars);
+
+    // 直近マーカー column: latest event across confluence / QT flips /
+    // QT precursors (ADR-16).
+    let open: Vec<f64> = d.daily.iter().map(|c| c.open).collect();
+    let qt = qtrend(
+        &open,
+        &high,
+        &low,
+        &close,
+        cfg.indicators.qtrend_period,
+        cfg.indicators.qtrend_atr,
+        cfg.indicators.qtrend_mult,
+    );
+    let qt_flips: Vec<(usize, i8)> = qt
+        .flip
+        .iter()
+        .enumerate()
+        .filter_map(|(i, f)| f.map(|dir| (i, dir)))
+        .collect();
+    let precursors = qtrend_precursors(&close, &qt, cfg.indicators.qtrend_precursor_atr);
+    let last_marker = latest_marker(&events, &qt_flips, &precursors, d.daily.len() - 1);
 
     let (state, proximity_score, bars_since) = match latest_proximity(&d.daily, cfg) {
         Some(p) => (p.state, p.proximity_score, p.bars_since_trigger),
@@ -121,6 +172,7 @@ fn assemble_symbol_score(d: &SymbolData, cfg: &ScanConfig) -> SymbolScore {
         suggested_stop: stop,
         marker_hit_rate: hit_rate,
         marker_samples: samples,
+        last_marker,
     }
 }
 
@@ -424,6 +476,23 @@ mod tests {
             })
             .collect();
         cache.upsert_candles(symbol, tf, &candles).unwrap();
+    }
+
+    #[test]
+    fn latest_marker_picks_most_recent_and_breaks_ties() {
+        // Empty everywhere → None.
+        assert_eq!(latest_marker(&[], &[], &[], 100), None);
+        // Latest bar wins regardless of source.
+        let lm = latest_marker(&[(10, 1)], &[(20, -1)], &[(15, 1)], 25).unwrap();
+        assert_eq!(lm.kind, MarkerKind::QtFlip);
+        assert_eq!(lm.dir, -1);
+        assert_eq!(lm.bars_ago, 5);
+        // Same-bar tie: Confluence > QtFlip > QtPrecursor.
+        let lm = latest_marker(&[(20, 1)], &[(20, -1)], &[(20, 1)], 20).unwrap();
+        assert_eq!(lm.kind, MarkerKind::Confluence);
+        assert_eq!(lm.bars_ago, 0);
+        let lm = latest_marker(&[], &[(20, -1)], &[(20, 1)], 20).unwrap();
+        assert_eq!(lm.kind, MarkerKind::QtFlip);
     }
 
     #[test]

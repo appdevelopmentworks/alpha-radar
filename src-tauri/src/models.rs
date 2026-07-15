@@ -115,6 +115,39 @@ pub struct RowError {
     pub reason: String,
 }
 
+/// Kind of a chart marker event, for the radar's 直近マーカー column (ADR-16).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MarkerKind {
+    /// ADR-14 confluence marker (Supertrend leg × score threshold).
+    Confluence,
+    /// Q-Trend direction flip (ADR-15).
+    QtFlip,
+    /// Q-Trend precursor (ADR-15).
+    QtPrecursor,
+}
+
+impl MarkerKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            MarkerKind::Confluence => "confluence",
+            MarkerKind::QtFlip => "qt_flip",
+            MarkerKind::QtPrecursor => "qt_precursor",
+        }
+    }
+}
+
+/// The most recent marker event across all sources on the daily timeframe
+/// (radar 直近マーカー column).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct LastMarker {
+    pub kind: MarkerKind,
+    /// `+1` buy-side, `-1` sell-side.
+    pub dir: i8,
+    /// Daily bars since the event; `0` = the latest bar.
+    pub bars_ago: u32,
+}
+
 /// Per-symbol scan result: the direction axis, the proximity axis, and risk
 /// fields. Persisted to the `scores` table (docs/04).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -143,6 +176,9 @@ pub struct SymbolScore {
     pub marker_hit_rate: Option<f64>,
     /// Number of marker events the hit rate was evaluated on.
     pub marker_samples: u32,
+    /// The most recent marker event across all sources (confluence / Q-Trend
+    /// flip / Q-Trend precursor) — the radar's 直近マーカー column.
+    pub last_marker: Option<LastMarker>,
 }
 
 /// Result of a universe scan returned across the Tauri boundary (docs/01).
@@ -177,7 +213,7 @@ pub struct ChartMarker {
     pub time: i64,
     pub position: String, // "aboveBar" | "belowBar"
     pub color: String,
-    pub shape: String, // "arrowUp" | "arrowDown"
+    pub shape: String, // "arrowUp" | "arrowDown" | "circle"
     pub text: String,
 }
 
@@ -210,6 +246,16 @@ pub struct ChartData {
     pub buy_threshold: f64,
     pub sell_threshold: f64,
     pub markers: Vec<ChartMarker>,
+    /// Q-Trend display layer (ADR-15): the ratcheting trend line, its flip
+    /// markers (QT BUY/SELL/STRONG), and precursor circles — coexists with the
+    /// ADR-14 confluence `markers`.
+    pub qtrend: Vec<TimeValue>,
+    pub qt_markers: Vec<ChartMarker>,
+    pub qt_precursors: Vec<ChartMarker>,
+    /// Supertrend flip markers (ADR-16): display-only visual-comparison layer
+    /// for TradingView's Adaptive Trend Sentinel. The raw flip rule measured
+    /// no edge (hit10 50.3% / PF10 1.01 — ADR-14 rule B); default OFF.
+    pub st_markers: Vec<ChartMarker>,
     pub mtf_summary: Vec<TfSummary>,
     /// Display-only: how many of the most recent bars to fit in the initial
     /// view (from `ScanConfig::chart_bars`). The full series is still sent.

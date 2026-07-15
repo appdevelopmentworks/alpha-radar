@@ -14,23 +14,57 @@ const hist = (s: HistBar[]) => s.map((p) => ({ time: t(p.time), value: p.value, 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Refs = any;
 
+// Target pixel height of a visible sub-pane (MACD / Squeeze / score); the
+// price pane absorbs the remaining host height (window-fill layout).
+const SUB_PANE_PX = 130;
+const MIN_PRICE_PX = 240;
+const TIME_AXIS_PX = 28; // approximation — affects px accuracy only, not ratios
+
+/// Collapse/expand panes to fit the toggles. Uses stretch factors, NEVER
+/// `setHeight`: lightweight-charts clamps `setHeight` to a 30px minimum and
+/// redistributes the delta across sibling panes (re-inflating collapsed ones),
+/// while a stretch factor of 0 collapses a pane to a 2px sliver. Factors are
+/// fed in pixels so visible sub-panes stay ~fixed and the price pane takes all
+/// resize delta.
+function applyPaneLayout(chart: Refs, v: ChartVisibility, host: HTMLElement) {
+  const panes = chart.panes();
+  if (panes.length < 4 || host.clientHeight === 0) return;
+  const subs = [v.macd, v.squeeze, v.score]; // panes 1 / 2 / 3
+  const total = Math.max(0, host.clientHeight - TIME_AXIS_PX);
+  const visibleSubs = subs.filter(Boolean).length;
+  const pricePx = Math.max(MIN_PRICE_PX, total - visibleSubs * SUB_PANE_PX);
+  panes[0].setStretchFactor(pricePx);
+  subs.forEach((on, i) => panes[i + 1].setStretchFactor(on ? SUB_PANE_PX : 0));
+}
+
 function applyVisibility(s: Refs, v: ChartVisibility, data: ChartData) {
   s.ema.forEach((x: Refs) => x.applyOptions({ visible: v.ema }));
   s.supertrend.applyOptions({ visible: v.supertrend });
   s.ichimoku.forEach((x: Refs) => x.applyOptions({ visible: v.ichimoku }));
   s.macd.forEach((x: Refs) => x.applyOptions({ visible: v.macd }));
   s.squeeze.applyOptions({ visible: v.squeeze });
-  s.markers.setMarkers(
-    v.markers
-      ? data.markers.map((m) => ({
-          time: t(m.time),
-          position: m.position,
-          color: m.color,
-          shape: m.shape,
-          text: m.text,
-        }))
-      : [],
-  );
+  // Hiding the score series also hides its buy/sell createPriceLine dashes and
+  // axis labels (price lines render only while their series is visible).
+  s.score.applyOptions({ visible: v.score });
+  s.qtrend.applyOptions({ visible: v.qtrend });
+  // One markers plugin, four toggleable sources (ADR-14 confluence markers,
+  // Q-Trend flips, Q-Trend precursors, Supertrend flips); lightweight-charts
+  // requires the merged array sorted ascending by time.
+  const merged = [
+    ...(v.markers ? data.markers : []),
+    ...(v.qtrend ? data.qt_markers : []),
+    ...(v.qtPrecursor ? data.qt_precursors : []),
+    ...(v.stFlip ? data.st_markers : []),
+  ]
+    .map((m) => ({
+      time: t(m.time),
+      position: m.position,
+      color: m.color,
+      shape: m.shape,
+      text: m.text,
+    }))
+    .sort((a, b) => (a.time as number) - (b.time as number));
+  s.markers.setMarkers(merged);
 }
 
 export function MultiPaneChart({
@@ -54,6 +88,7 @@ export function MultiPaneChart({
     if (!host) return;
     let disposed = false;
     let chart: { remove: () => void } | undefined;
+    let cleanupResize: (() => void) | undefined;
 
     (async () => {
       const lwc = await import("lightweight-charts");
@@ -74,7 +109,13 @@ export function MultiPaneChart({
           background: { type: ColorType.Solid, color: "#11161f" },
           textColor: "#8a93a3",
           attributionLogo: true, // TradingView license requirement (docs/05)
-          panes: { separatorColor: "#232b38", separatorHoverColor: "#2f3a4d" },
+          panes: {
+            separatorColor: "#232b38",
+            separatorHoverColor: "#2f3a4d",
+            // Separator dragging would silently overwrite the stretch factors
+            // applyPaneLayout manages.
+            enableResize: false,
+          },
         },
         grid: { vertLines: { color: "#1a212d" }, horzLines: { color: "#1a212d" } },
         crosshair: { mode: 0 },
@@ -121,6 +162,9 @@ export function MultiPaneChart({
       ema[2].setData(line(data.ema200));
       const supertrend = addLine(0, "#3fb950", 2);
       supertrend.setData(line(data.supertrend));
+      // Q-Trend ratcheting trend line (ADR-15) — blue to match its QT markers.
+      const qtrendLine = addLine(0, "#2196f3", 2);
+      qtrendLine.setData(line(data.qtrend));
       const ichimoku = [
         addLine(0, "#56c0c0"),
         addLine(0, "#d56b6b"),
@@ -133,8 +177,9 @@ export function MultiPaneChart({
       ichimoku[3].setData(line(data.senkou_b));
       const markers = createSeriesMarkers(candle, []);
 
-      // Pane 1 — MACD ; Pane 2 — Squeeze ; Pane 3 — score (fixed layout so
-      // toggling never changes the pane structure / triggers a resize).
+      // Pane 1 — MACD ; Pane 2 — Squeeze ; Pane 3 — score. The pane STRUCTURE
+      // is fixed (no series rebuild on toggle); heights are managed by
+      // applyPaneLayout, which collapses hidden panes via stretch factors.
       const macdHist = c.addSeries(
         HistogramSeries,
         { priceLineVisible: false, lastValueVisible: false },
@@ -172,7 +217,15 @@ export function MultiPaneChart({
         title: "sell",
       });
 
-      c.panes().forEach((p, i) => p.setHeight(i === 0 ? 340 : 120));
+      applyPaneLayout(c, visibleRef.current, host);
+      // Re-fit pane heights when the host box changes (window resize / flex
+      // reflow). autoSize handles the chart canvas itself; this keeps the
+      // sub-panes at ~fixed px with the price pane absorbing the delta.
+      const ro = new ResizeObserver(() => {
+        if (!disposed) applyPaneLayout(c, visibleRef.current, host);
+      });
+      ro.observe(host);
+      cleanupResize = () => ro.disconnect();
       // Initial zoom: show only the most recent `initial_bars` candles (a swing
       // view fits ~100), keeping the chart's right offset as breathing room.
       // Fall back to fitting everything when there are fewer bars than that.
@@ -188,11 +241,15 @@ export function MultiPaneChart({
       }
 
       seriesRef.current = {
+        chart: c,
+        host,
         ema,
         supertrend,
+        qtrend: qtrendLine,
         ichimoku,
         macd: [macdHist, macdLine, macdSignal],
         squeeze,
+        score,
         markers,
       };
       applyVisibility(seriesRef.current, visibleRef.current, data);
@@ -201,13 +258,18 @@ export function MultiPaneChart({
     return () => {
       disposed = true;
       seriesRef.current = null;
+      cleanupResize?.();
       chart?.remove();
     };
   }, [data]);
 
-  // Toggle series visibility only — no chart rebuild, no resize.
+  // Toggle series visibility + pane heights only — no chart rebuild, zoom is
+  // preserved (stretch factors change, pane structure does not).
   useEffect(() => {
-    if (seriesRef.current) applyVisibility(seriesRef.current, visible, data);
+    const s = seriesRef.current;
+    if (!s) return;
+    applyVisibility(s, visible, data);
+    applyPaneLayout(s.chart, visible, s.host);
   }, [visible, data]);
 
   return <div ref={ref} className="chart-host" />;

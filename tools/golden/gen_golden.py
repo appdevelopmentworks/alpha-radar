@@ -37,7 +37,10 @@ BASE_TS = 1_577_836_800  # 2020-01-01T00:00:00Z
 DAY = 86_400
 
 # Periods exercised by the golden tests (match config.rs defaults).
-PERIODS = {"sma": 20, "ema": [20, 50], "rsi": 14, "atr": 14, "linreg": 20}
+# qtrend: p=50 primary (the 220-bar fixture yields many flips — exercises the
+# ratchet/state machine), p=200 secondary (production default; pins the seed
+# convention with the few flips the fixture allows).
+PERIODS = {"sma": 20, "ema": [20, 50], "rsi": 14, "atr": 14, "linreg": 20, "qtrend": [50, 200]}
 
 
 def generate_csv() -> pd.DataFrame:
@@ -117,6 +120,68 @@ def supertrend_ref(high, low, close, period, mult):
         direction[i] = d
         fu_prev, fl_prev, d_prev = fu, fl, d
     return line, direction
+
+
+def qtrend_ref(open_, high, low, close, p, atr_p, mult):
+    """Reference Q-Trend mirroring src-tauri indicators::trend::qtrend,
+    reusing talib.ATR (== the Rust `atr` primitive). Returns
+    (line, dir, flip, strong, dist_flip_atr); strong as 0/1 ints."""
+    n = len(close)
+    line: list = [None] * n
+    dir_: list = [None] * n
+    flip: list = [None] * n
+    strong = [0] * n
+    dist: list = [None] * n
+    if p == 0 or p > n:
+        return line, dir_, flip, strong, dist
+    atrv = talib.ATR(high, low, close, atr_p)
+    hh = pd.Series(close).rolling(p).max().to_numpy()
+    ll = pd.Series(close).rolling(p).min().to_numpy()
+    start = p - 1
+    sb = [False] * n
+    ss = [False] * n
+    m, ls = 0.0, 0
+    for i in range(start, n):
+        h, l = hh[i], ll[i]
+        d = h - l
+        sb[i] = l <= open_[i] < l + d / 8.0
+        ss[i] = h - d / 8.0 < open_[i] <= h
+        m_carried = (h + l) / 2.0 if i == start else m
+        a_prev = atrv[i - 1] if i > 0 else float("nan")
+        if math.isnan(a_prev):
+            m = m_carried
+            line[i] = m
+            continue
+        eps = mult * a_prev
+        change_up = close[i] > m_carried + eps
+        change_down = close[i] < m_carried - eps
+        if change_up:
+            m = m_carried + eps
+        elif change_down:
+            m = m_carried - eps
+        else:
+            m = m_carried
+        prev_ls = ls
+        if change_up:
+            ls = 1
+        elif change_down:
+            ls = -1
+        if change_up and prev_ls != 1:
+            flip[i] = 1
+            strong[i] = int(any(sb[max(i - 4, start) : i + 1]))
+        elif change_down and prev_ls != -1:
+            flip[i] = -1
+            strong[i] = int(any(ss[max(i - 4, start) : i + 1]))
+        line[i] = m
+        if ls != 0:
+            dir_[i] = ls
+            a_now = atrv[i]
+            if not math.isnan(a_now) and a_now > 0:
+                if ls == -1:
+                    dist[i] = ((m + mult * a_now) - close[i]) / a_now
+                else:
+                    dist[i] = (close[i] - (m - mult * a_now)) / a_now
+    return line, dir_, flip, strong, dist
 
 
 def ichimoku_ref(high, low, tenkan_p, kijun_p, senkou_b_p, disp):
@@ -240,6 +305,7 @@ def main() -> None:
     # Recompute from the written CSV so TA-Lib operates on the exact rounded
     # values the Rust test will parse.
     df = pd.read_csv(CSV_PATH)
+    open_ = df["open"].to_numpy(dtype="float64")
     close = df["close"].to_numpy(dtype="float64")
     high = df["high"].to_numpy(dtype="float64")
     low = df["low"].to_numpy(dtype="float64")
@@ -247,6 +313,8 @@ def main() -> None:
     # Reference series for indicators TA-Lib does not provide (mirror the Rust
     # algorithm exactly; Supertrend reuses talib.ATR == the Rust `atr`).
     st_line, st_dir = supertrend_ref(high, low, close, 10, 3.0)
+    qt50 = qtrend_ref(open_, high, low, close, 50, 14, 1.0)
+    qt200 = qtrend_ref(open_, high, low, close, 200, 14, 1.0)
     ichi_t, ichi_k, ichi_a, ichi_b = ichimoku_ref(high, low, 9, 26, 52, 26)
     # MACD composed from the SMA-seeded talib.EMA primitive (= TradingView /
     # the Rust `ema`). talib.MACD() seeds its signal EMA differently (a TA-Lib
@@ -293,6 +361,14 @@ def main() -> None:
         "adx_14": to_json_list(talib.ADX(high, low, close, 14)),
         "st_line": clean(st_line),
         "st_dir": clean(st_dir),
+        "qt_line_50": clean(qt50[0]),
+        "qt_dir_50": clean(qt50[1]),
+        "qt_flip_50": clean(qt50[2]),
+        "qt_strong_50": clean(qt50[3]),
+        "qt_dist_50": clean(qt50[4]),
+        "qt_line_200": clean(qt200[0]),
+        "qt_dir_200": clean(qt200[1]),
+        "qt_flip_200": clean(qt200[2]),
         "ichi_tenkan": clean(ichi_t.to_numpy()),
         "ichi_kijun": clean(ichi_k.to_numpy()),
         "ichi_senkou_a": clean(ichi_a.to_numpy()),

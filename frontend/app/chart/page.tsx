@@ -27,7 +27,11 @@ const TOGGLES: { key: keyof ChartVisibility; label: string }[] = [
   { key: "ichimoku", label: "一目均衡表" },
   { key: "macd", label: "MACD" },
   { key: "squeeze", label: "Squeeze" },
+  { key: "score", label: "スコア" },
   { key: "markers", label: "売買マーカー" },
+  { key: "qtrend", label: "Q-Trend" },
+  { key: "qtPrecursor", label: "QT前兆" },
+  { key: "stFlip", label: "STフリップ" },
 ];
 
 function ChartInner() {

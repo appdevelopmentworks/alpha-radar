@@ -9,7 +9,7 @@ import { ScoreCell, scoreColor } from "@/components/ScoreCell";
 import { SignalBadge } from "@/components/SignalBadge";
 import type { Sort, SortField } from "@/lib/radar-view";
 import { useScan } from "@/lib/scan-store";
-import type { AssetClass, Regime, SignalState, SymbolScore } from "@/lib/types";
+import type { AssetClass, MarkerKind, Regime, SignalState, SymbolScore } from "@/lib/types";
 
 const COLUMNS: { key: SortField | null; label: string }[] = [
   { key: "symbol", label: "銘柄 / 名称" },
@@ -17,6 +17,7 @@ const COLUMNS: { key: SortField | null; label: string }[] = [
   { key: "proximity_score", label: "近接度" },
   { key: "score_final", label: "方向スコア" },
   { key: "marker_hit_rate", label: "的中率" },
+  { key: "last_marker_bars", label: "直近マーカー" },
   { key: "regime", label: "レジーム" },
   { key: null, label: "内訳" },
   { key: "bars_since_trigger", label: "経過" },
@@ -64,6 +65,8 @@ function sortValue(s: SymbolScore, field: SortField): number | string | null {
       return s.score_final;
     case "marker_hit_rate":
       return s.marker_hit_rate;
+    case "last_marker_bars":
+      return s.last_marker ? s.last_marker.bars_ago : null;
     case "bars_since_trigger":
       return s.bars_since_trigger;
     case "atr":
@@ -102,6 +105,29 @@ function HitRateCell({ s }: { s: SymbolScore }) {
     >
       {pct.toFixed(0)}%
       <span className="hit-n"> ({s.marker_samples})</span>
+    </td>
+  );
+}
+
+// 直近マーカー badge: kind × direction colors match the chart's marker layers.
+const MARKER_BADGE: Record<MarkerKind, { label: string; buy: string; sell: string }> = {
+  confluence: { label: "確定", buy: "#26a69a", sell: "#ef5350" },
+  qt_flip: { label: "QT", buy: "#2196f3", sell: "#ff9800" },
+  qt_precursor: { label: "前兆", buy: "#90caf9", sell: "#ffcc80" },
+};
+
+function LastMarkerCell({ s }: { s: SymbolScore }) {
+  const m = s.last_marker;
+  if (!m) return <td className="num">—</td>;
+  const b = MARKER_BADGE[m.kind];
+  const color = m.dir > 0 ? b.buy : b.sell;
+  const when = m.bars_ago === 0 ? "本日" : `${m.bars_ago}日前`;
+  return (
+    <td title="経過は営業日ベース（日足バー数）">
+      <span className="marker-badge" style={{ color, borderColor: color }}>
+        {b.label}
+        {m.dir > 0 ? "買" : "売"} {when}
+      </span>
     </td>
   );
 }
@@ -154,6 +180,7 @@ function Row({ s, onOpen }: { s: SymbolScore; onOpen: (symbol: string) => void }
         <ScoreCell value={s.score_final} />
       </td>
       <HitRateCell s={s} />
+      <LastMarkerCell s={s} />
       <td className="cell-regime">{s.regime ? REGIME_LABEL[s.regime] : "—"}</td>
       <td>
         <MiniBreakdown s={s} />
@@ -241,14 +268,18 @@ export function RankingTable({
     router.push(`/chart?symbol=${encodeURIComponent(symbol)}`);
 
   // Click a header: toggle direction if it's the active field, else select it
-  // (numbers default to descending, the symbol name to ascending).
+  // (numbers default to descending; the symbol name and marker recency —
+  // most-recent-first — to ascending).
   const onSort = (field: SortField) =>
     setRadarView((v) => ({
       ...v,
       sort:
         v.sort.field === field
           ? { field, dir: v.sort.dir === "asc" ? "desc" : "asc" }
-          : { field, dir: field === "symbol" ? "asc" : "desc" },
+          : {
+              field,
+              dir: field === "symbol" || field === "last_marker_bars" ? "asc" : "desc",
+            },
     }));
 
   const { buys, sells, neutrals } = useMemo(() => {

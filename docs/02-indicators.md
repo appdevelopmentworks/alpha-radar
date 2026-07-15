@@ -23,6 +23,16 @@
 - `basic_upper = (H+L)/2 + mult*ATR`, `basic_lower = (H+L)/2 - mult*ATR`、トレンド方向のフリップで final band 決定。
 - サブスコア: 価格がライン上=+、下=−。`s = dir * clamp(|close - line| / (mult*ATR), 0, 1)`。
 
+### Q-Trend（p 200 / ATR 14 / mult 1.0, Type A）— 表示専用（ADR-15）
+- TradingView「Q-Trend」（tarasenko_）の忠実移植。**スコア非参加**（サブスコアなし）— チャートの売買タイミング表示レイヤーとしてのみ使用。
+- アルゴリズム: `m` = 終値の p 本 highest/lowest の中点で初期化されるラチェット式トレンドライン。`eps = mult × ATR(atr_p)[前バー]`。`close > m+eps` で `m := m+eps`（change_up）、`close < m−eps` で `m := m−eps`（change_down）。判定は**前バーの最終 m** に対して行い、ラチェットは判定後（Pine の実行順序に忠実）。
+- **マーカーは方向フリップ時のみ**（`ls` が S→B で QT BUY、B→S で QT SELL）。トレンド中の連続 change_up/down は m を階段状に価格へ追従させるだけでマーカーは出ない。
+- **STRONG**: 始値が p 本レンジの下位（買い）/上位（売り）1/8 圏に直近5本以内で入っていたフリップは `QT STRONG` 表示。
+- **前兆（precursor）**: 逆方向フリップ待ち中、`dist_flip_atr = |フリップ閾値 − close| / ATR`（閾値 = `m ± mult×ATR[当日]`、当日終値時点で既知＝先読みなし）が `0 < dist ≤ qtrend_precursor_atr`（既定 0.5）かつ終値が閾値方向へ動いた**最初のバー**で発火（1レグ1回、フリップで再アーム）。チャートに `QT前兆` サークルで表示。
+- ウォームアップ規約: シードは最初の完全 p 窓バー1本（Pine は bar p まで再シード）— 最大1本の序盤乖離で、ラチェットが価格へ収束するため信号タイミングは速やかに一致（ATR シード注記と同クラス）。
+- ゴールデン: p=50 主系列（220本フィクスチャで16フリップ・状態機械を網羅）+ p=200 補助（シード規約固定）。`tools/golden/gen_golden.py` の `qtrend_ref` が Rust と行対応。
+- パラメータ: `qtrend_period` / `qtrend_atr` / `qtrend_mult` / `qtrend_precursor_atr`（`IndicatorParams`、serde 既定付き＝保存済み設定と後方互換）。
+
 ### EMA リボン（20 / 50 / 200）
 - 3本のEMAの**並び順（パーフェクトオーダー）**と**傾き**を連続スコア化。
 - `order_score`: 20>50>200 で +1、逆順で −1、混在は部分点。`slope_score`: 各EMAの直近変化率の符号平均。

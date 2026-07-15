@@ -40,6 +40,18 @@ export interface SymbolScore {
   marker_hit_rate: number | null;
   // Number of marker events the hit rate was evaluated on.
   marker_samples: number;
+  // Most recent marker event across all sources (直近マーカー column).
+  last_marker: LastMarker | null;
+}
+
+export type MarkerKind = "confluence" | "qt_flip" | "qt_precursor";
+
+export interface LastMarker {
+  kind: MarkerKind;
+  // +1 buy-side, -1 sell-side.
+  dir: number;
+  // Daily bars since the event; 0 = the latest bar.
+  bars_ago: number;
 }
 
 export interface RowError {
@@ -133,7 +145,7 @@ export interface ChartMarker {
   time: number;
   position: "aboveBar" | "belowBar";
   color: string;
-  shape: "arrowUp" | "arrowDown";
+  shape: "arrowUp" | "arrowDown" | "circle";
   text: string;
 }
 
@@ -161,6 +173,12 @@ export interface ChartData {
   buy_threshold: number;
   sell_threshold: number;
   markers: ChartMarker[];
+  // Q-Trend display layer (ADR-15): trend line, flip markers, precursor circles.
+  qtrend: TimeValue[];
+  qt_markers: ChartMarker[];
+  qt_precursors: ChartMarker[];
+  // Supertrend flip markers (ADR-16, ATS visual comparison; default OFF).
+  st_markers: ChartMarker[];
   mtf_summary: TfSummary[];
   // Number of most-recent bars to fit in the initial view (from chart_bars).
   initial_bars: number;

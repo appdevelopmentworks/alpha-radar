@@ -67,7 +67,7 @@ export function DropZone({
         ⤓
       </span>
       <span className="dz-title">ウォッチリスト CSV をドロップ</span>
-      <span className="dz-sub">またはクリックして選択（`symbol` 列必須）</span>
+      <span className="dz-sub">またはクリックして選択（先頭列＝コード / UTF-8・Shift_JIS対応）</span>
     </button>
   );
 }

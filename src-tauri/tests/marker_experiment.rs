@@ -6,7 +6,7 @@
 use alpha_radar_lib::config::{Preset, ScanConfig};
 use alpha_radar_lib::data::cache::Cache;
 use alpha_radar_lib::indicators::momentum::macd;
-use alpha_radar_lib::indicators::trend::supertrend;
+use alpha_radar_lib::indicators::trend::{qtrend, qtrend_precursors, supertrend};
 use alpha_radar_lib::models::Tf;
 use alpha_radar_lib::scoring::composite::single_tf_score;
 
@@ -195,9 +195,19 @@ fn compare_marker_rules() {
         ("F leg-first score>=thresh", Agg::default()),
         ("F0 leg-first score>=0", Agg::default()),
         ("G aligned crossings", Agg::default()),
+        // Q-Trend layer (ADR-15). H = the TradingView marker timing; I = one
+        // bar earlier (hindsight upper bound for the user's hypothesis); J =
+        // the real-time-detectable precursor approximation of I.
+        ("H qtrend-flip", Agg::default()),
+        ("I qtrend-flip-minus-1", Agg::default()),
+        ("J qtrend-precursor", Agg::default()),
     ];
     let mut n_symbols = 0usize;
     let mut total_bars = 0usize;
+    // Precursor lead/precision diagnostics (rule J quality).
+    let (mut flips_total, mut flips_with_pre) = (0usize, 0usize);
+    let (mut pre_total, mut pre_followed) = (0usize, 0usize);
+    let mut lead_sum = 0usize;
 
     for sym in &symbols {
         let candles = cache.load_candles(sym, Tf::Daily).unwrap();
@@ -206,6 +216,7 @@ fn compare_marker_rules() {
         }
         n_symbols += 1;
         total_bars += candles.len();
+        let open: Vec<f64> = candles.iter().map(|c| c.open).collect();
         let high: Vec<f64> = candles.iter().map(|c| c.high).collect();
         let low: Vec<f64> = candles.iter().map(|c| c.low).collect();
         let close: Vec<f64> = candles.iter().map(|c| c.close).collect();
@@ -214,8 +225,17 @@ fn compare_marker_rules() {
         let score = single_tf_score(&candles, &cfg);
         let st = supertrend(&high, &low, &close, p.supertrend_atr, p.supertrend_mult);
         let m = macd(&close, p.macd_fast, p.macd_slow, p.macd_signal);
+        let qt = qtrend(
+            &open,
+            &high,
+            &low,
+            &close,
+            p.qtrend_period,
+            p.qtrend_atr,
+            p.qtrend_mult,
+        );
 
-        let mut rules: Vec<Vec<(usize, i8)>> = vec![Vec::new(); 8];
+        let mut rules: Vec<Vec<(usize, i8)>> = vec![Vec::new(); 11];
         // Leg-scoped state: has the current supertrend leg already produced a
         // marker (F: at threshold strength, F0: at any confirming sign)?
         let mut leg_done_f = false;
@@ -278,6 +298,43 @@ fn compare_marker_rules() {
                 }
             }
         }
+        // H/I/J: Q-Trend flips, flips shifted 1 bar earlier, and precursors.
+        let flips: Vec<(usize, i8)> = qt
+            .flip
+            .iter()
+            .enumerate()
+            .filter_map(|(i, f)| f.map(|d| (i, d)))
+            .collect();
+        for &(i, d) in &flips {
+            if i >= WARMUP {
+                rules[8].push((i, d));
+            }
+            if i > WARMUP {
+                rules[9].push((i - 1, d));
+            }
+        }
+        let pres = qtrend_precursors(&close, &qt, p.qtrend_precursor_atr);
+        for &(i, d) in &pres {
+            if i >= WARMUP {
+                rules[10].push((i, d));
+            }
+        }
+        // Diagnostics: coverage (flip had a precursor within the prior 3 bars),
+        // precision (precursor followed by a flip within 3 bars), mean lead.
+        for &(fi, _) in flips.iter().filter(|(i, _)| *i >= WARMUP) {
+            flips_total += 1;
+            if pres.iter().any(|&(pi, _)| pi < fi && fi - pi <= 3) {
+                flips_with_pre += 1;
+            }
+        }
+        for &(pi, _) in pres.iter().filter(|(i, _)| *i >= WARMUP) {
+            pre_total += 1;
+            if let Some(&(fi, _)) = flips.iter().find(|&&(fi, _)| fi > pi && fi - pi <= 3) {
+                pre_followed += 1;
+                lead_sum += fi - pi;
+            }
+        }
+
         for (r, (_, agg)) in rules.iter().zip(aggs.iter_mut()) {
             eval_rule(r, &high, &low, &close, agg);
         }
@@ -291,4 +348,19 @@ fn compare_marker_rules() {
     for (label, agg) in &aggs {
         agg.report(label, n_symbols.max(1));
     }
+
+    // Interpretation (docs plan): the "1 bar earlier" hypothesis is supported
+    // iff I beats H on ret10/PF AND J tracks I; if I > H but J <= H, the
+    // precursor definition needs tuning before any ranking integration.
+    println!(
+        "\nprecursor diagnostics: coverage={}/{} flips had a precursor within 3 bars ({:.0}%), \
+         precision={}/{} precursors flipped within 3 bars ({:.0}%), mean lead={:.2} bars",
+        flips_with_pre,
+        flips_total,
+        100.0 * flips_with_pre as f64 / flips_total.max(1) as f64,
+        pre_followed,
+        pre_total,
+        100.0 * pre_followed as f64 / pre_total.max(1) as f64,
+        lead_sum as f64 / pre_followed.max(1) as f64,
+    );
 }

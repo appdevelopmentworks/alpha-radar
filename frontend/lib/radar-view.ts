@@ -12,6 +12,7 @@ export type SortField =
   | "score_final"
   | "regime"
   | "marker_hit_rate"
+  | "last_marker_bars"
   | "bars_since_trigger"
   | "atr"
   | "suggested_stop";

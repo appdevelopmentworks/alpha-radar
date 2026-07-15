@@ -141,6 +141,7 @@ for symbol in universe:
 }
 ```
 - エラーは**構造化**で返す（例外で全体を落とさない）。Rust が `RowError` に変換。
+- **非有限値の扱い**: yfinance は欠損や当日未確定バーで `NaN`/`Inf` を返すことがある。Python 既定の `json.dump` はこれを **`NaN`/`Infinity` リテラル**として出力するが、これは不正な JSON で Rust の `serde_json` が拒否する（`expected value` エラー）。そのためサイドカーは **OHLC が欠損する足を `dropna` で除外**し、残る `volume`/`adj_close` の非有限値を有限へ丸め、最終出力は `json.dumps(..., allow_nan=False)`（すり抜け時は構造化エラーにフォールバック）で**必ず正当な JSON**を返す。
 - `output="parquet"` の場合: `{ "parquet_path": "/tmp/alpha-radar-xxxx.parquet", "errors": [...] }` を返し Rust 側で読む（大規模ユニバース向け）。
 
 ## yfinance 仕様・運用

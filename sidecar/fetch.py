@@ -12,6 +12,7 @@ Run (dev):  uv run --project sidecar python sidecar/fetch.py
 from __future__ import annotations
 
 import json
+import math
 import sys
 import time
 from typing import Any
@@ -19,6 +20,17 @@ from typing import Any
 
 def _err_response(reason: str) -> dict[str, Any]:
     return {"results": [], "errors": [{"symbol": "*", "interval": "*", "reason": reason}]}
+
+
+def _finite(x, default: float = 0.0) -> float:
+    """Coerce to a JSON-safe finite float. yfinance can yield NaN/Inf (missing
+    values, current in-progress bar); the default `json` module would emit the
+    literal `NaN`/`Infinity`, which is invalid JSON the Rust side rejects."""
+    try:
+        v = float(x)
+    except (TypeError, ValueError):
+        return default
+    return v if math.isfinite(v) else default
 
 
 def _to_unix(ts) -> int:
@@ -47,20 +59,26 @@ def _fetch_one(yf, pd, item: dict, auto_adjust: bool, retries: int = 3):
             df = yf.Ticker(symbol).history(**kwargs)
             if df is None or df.empty:
                 return None, "no data / delisted"
+            # Drop bars with a missing OHLC value: they are unusable for the
+            # indicators and would otherwise serialize as invalid-JSON `NaN`.
+            ohlc_cols = [c for c in ("Open", "High", "Low", "Close") if c in df.columns]
+            df = df.dropna(subset=ohlc_cols)
+            if df.empty:
+                return None, "no data / delisted"
             candles = []
             has_adj = "Adj Close" in df.columns
             for idx, row in df.iterrows():
-                close = float(row["Close"])
+                close = _finite(row["Close"])
                 candles.append(
                     {
                         "ts": _to_unix(idx),
-                        "open": float(row["Open"]),
-                        "high": float(row["High"]),
-                        "low": float(row["Low"]),
+                        "open": _finite(row["Open"]),
+                        "high": _finite(row["High"]),
+                        "low": _finite(row["Low"]),
                         "close": close,
-                        "volume": float(row["Volume"]),
+                        "volume": _finite(row["Volume"]),
                         # auto_adjust=True already adjusts Close; mirror it.
-                        "adj_close": float(row["Adj Close"]) if has_adj else close,
+                        "adj_close": _finite(row["Adj Close"], close) if has_adj else close,
                     }
                 )
             return candles, None
@@ -103,7 +121,16 @@ def main() -> None:
 
     # NOTE: output="parquet" (large universes) is a planned optimization; this
     # build always returns inline JSON.
-    json.dump({"results": results, "errors": errors}, sys.stdout)
+    # `allow_nan=False` is a safety net: the Rust parser rejects `NaN`/`Infinity`
+    # (not valid JSON), so rather than emit an unparseable stream we surface a
+    # structured error. Candles are already coerced finite above, so this should
+    # not trigger in practice.
+    out = {"results": results, "errors": errors}
+    try:
+        payload = json.dumps(out, allow_nan=False)
+    except ValueError:
+        payload = json.dumps(_err_response("non-finite value in fetched data"))
+    sys.stdout.write(payload)
 
 
 if __name__ == "__main__":

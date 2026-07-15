@@ -6,7 +6,9 @@ use crate::config::ScanConfig;
 use crate::data::cache::Cache;
 use crate::error::{AppError, AppResult};
 use crate::indicators::momentum::{macd, squeeze_momentum};
-use crate::indicators::trend::{adx_dmi, ema_ribbon, ichimoku, supertrend};
+use crate::indicators::trend::{
+    adx_dmi, ema_ribbon, ichimoku, qtrend, qtrend_precursors, supertrend, QTrend,
+};
 use crate::indicators::volatility::choppiness;
 use crate::models::{ChartData, ChartMarker, HistBar, Tf, TfSummary, TimeValue};
 use crate::regime::regime_series;
@@ -115,6 +117,108 @@ fn confluence_markers(
         .collect()
 }
 
+/// Q-Trend flip markers (ADR-15 display layer): one per direction flip, blue/
+/// orange to stay visually distinct from the ADR-14 confluence markers.
+fn qtrend_flip_markers(ts: &[i64], close: &[f64], qt: &QTrend) -> Vec<ChartMarker> {
+    qt.flip
+        .iter()
+        .enumerate()
+        .filter_map(|(i, f)| f.map(|d| (i, d)))
+        .map(|(i, d)| {
+            let label = if qt.strong[i] {
+                "QT STRONG"
+            } else if d > 0 {
+                "QT BUY"
+            } else {
+                "QT SELL"
+            };
+            if d > 0 {
+                ChartMarker {
+                    time: ts[i],
+                    position: "belowBar".into(),
+                    color: "#2196f3".into(),
+                    shape: "arrowUp".into(),
+                    text: format!("{label} @ {:.2}", close[i]),
+                }
+            } else {
+                ChartMarker {
+                    time: ts[i],
+                    position: "aboveBar".into(),
+                    color: "#ff9800".into(),
+                    shape: "arrowDown".into(),
+                    text: format!("{label} @ {:.2}", close[i]),
+                }
+            }
+        })
+        .collect()
+}
+
+/// Supertrend direction-flip markers ("ST フリップ", ADR-16): one per flip bar.
+/// Display-only visual-comparison layer for TradingView's Adaptive Trend
+/// Sentinel (closed-source); the raw flip rule measured no edge
+/// (hit10 50.3% / PF10 1.01 — ADR-14 rule B), hence default OFF.
+fn st_flip_markers(ts: &[i64], close: &[f64], st_dir: &[Option<i8>]) -> Vec<ChartMarker> {
+    let mut out = Vec::new();
+    let mut prev: Option<i8> = None;
+    for (i, d) in st_dir.iter().enumerate() {
+        let Some(d) = *d else {
+            continue;
+        };
+        // The first Some after warm-up is Supertrend's up-trend
+        // initialization, not a flip.
+        if let Some(p) = prev {
+            if p != d {
+                out.push(if d > 0 {
+                    ChartMarker {
+                        time: ts[i],
+                        position: "belowBar".into(),
+                        color: "#3fb950".into(),
+                        shape: "arrowUp".into(),
+                        text: format!("ST LONG @ {:.2}", close[i]),
+                    }
+                } else {
+                    ChartMarker {
+                        time: ts[i],
+                        position: "aboveBar".into(),
+                        color: "#f0596a".into(),
+                        shape: "arrowDown".into(),
+                        text: format!("ST SHORT @ {:.2}", close[i]),
+                    }
+                });
+            }
+        }
+        prev = Some(d);
+    }
+    out
+}
+
+/// Q-Trend precursor circles: close within `precursor_atr` ATRs of the pending
+/// flip threshold and moving toward it (one per leg — ADR-15).
+fn qtrend_precursor_markers(
+    ts: &[i64],
+    close: &[f64],
+    qt: &QTrend,
+    precursor_atr: f64,
+) -> Vec<ChartMarker> {
+    qtrend_precursors(close, qt, precursor_atr)
+        .into_iter()
+        .map(|(i, pending)| {
+            let (position, color) = if pending > 0 {
+                ("belowBar", "#90caf9")
+            } else {
+                ("aboveBar", "#ffcc80")
+            };
+            ChartMarker {
+                time: ts[i],
+                position: position.into(),
+                color: color.into(),
+                shape: "circle".into(),
+                text: format!("QT前兆 @ {:.2}", close[i]),
+            }
+        })
+        .collect()
+}
+
 /// Conviction velocity from the tail of the score series.
 fn velocity_label(score: &[Option<f64>]) -> String {
     let recent: Vec<f64> = score.iter().rev().flatten().copied().take(4).collect();
@@ -174,6 +278,7 @@ pub fn build_chart_data(
         )));
     }
     let ts: Vec<i64> = candles.iter().map(|c| c.ts).collect();
+    let open: Vec<f64> = candles.iter().map(|c| c.open).collect();
     let high: Vec<f64> = candles.iter().map(|c| c.high).collect();
     let low: Vec<f64> = candles.iter().map(|c| c.low).collect();
     let close: Vec<f64> = candles.iter().map(|c| c.close).collect();
@@ -199,6 +304,15 @@ pub fn build_chart_data(
         p.squeeze_mult_kc,
     );
     let score_series = single_tf_score(&candles, cfg);
+    let qt = qtrend(
+        &open,
+        &high,
+        &low,
+        &close,
+        p.qtrend_period,
+        p.qtrend_atr,
+        p.qtrend_mult,
+    );
 
     Ok(ChartData {
         ema20: tv(&ts, &ribbon.fast),
@@ -224,6 +338,10 @@ pub fn build_chart_data(
             cfg.buy_threshold,
             cfg.sell_threshold,
         ),
+        qtrend: tv(&ts, &qt.line),
+        qt_markers: qtrend_flip_markers(&ts, &close, &qt),
+        qt_precursors: qtrend_precursor_markers(&ts, &close, &qt, p.qtrend_precursor_atr),
+        st_markers: st_flip_markers(&ts, &close, &st.dir),
         mtf_summary: mtf_summary(cache, symbol, cfg)?,
         initial_bars: cfg.chart_bars,
         ohlc: candles,
@@ -304,6 +422,92 @@ mod tests {
         let m = markers(&score, &dir);
         assert_eq!(m.len(), 1);
         assert_eq!(m[0].time, 2);
+    }
+
+    #[test]
+    fn qtrend_markers_label_flips_and_strong() {
+        use crate::indicators::trend::qtrend;
+        // Flat 100 → jump to 200 at bar 10 → drop back at bar 20 (guaranteed
+        // flips); open at the range bottom on the buy flip makes it STRONG.
+        let close: Vec<f64> = (0..30)
+            .map(|i| if (10..20).contains(&i) { 200.0 } else { 100.0 })
+            .collect();
+        let mut open = close.clone();
+        open[10] = 100.0;
+        let high: Vec<f64> = close.iter().map(|c| c + 1.0).collect();
+        let low: Vec<f64> = close.iter().map(|c| c - 1.0).collect();
+        let ts: Vec<i64> = (0..30).collect();
+        let qt = qtrend(&open, &high, &low, &close, 5, 3, 1.0);
+
+        let m = qtrend_flip_markers(&ts, &close, &qt);
+        assert_eq!(m.len(), 2);
+        assert_eq!(m[0].time, 10);
+        assert_eq!(m[0].shape, "arrowUp");
+        assert!(m[0].text.starts_with("QT STRONG"));
+        assert_eq!(m[1].time, 20);
+        assert_eq!(m[1].shape, "arrowDown");
+        assert!(m[1].text.starts_with("QT SELL"));
+    }
+
+    #[test]
+    fn st_flip_markers_skip_init_and_fire_on_flips() {
+        let n = 8;
+        let ts: Vec<i64> = (0..n as i64).collect();
+        let close = vec![100.0; n];
+        // Warm-up None, then init up (bar 2, NOT a flip), flip down at 4,
+        // flip up at 6.
+        let dir = [
+            None,
+            None,
+            Some(1),
+            Some(1),
+            Some(-1),
+            Some(-1),
+            Some(1),
+            Some(1),
+        ];
+        let m = st_flip_markers(&ts, &close, &dir);
+        assert_eq!(m.len(), 2);
+        assert_eq!(m[0].time, 4);
+        assert_eq!(m[0].shape, "arrowDown");
+        assert!(m[0].text.starts_with("ST SHORT"));
+        assert_eq!(m[1].time, 6);
+        assert_eq!(m[1].shape, "arrowUp");
+        assert!(m[1].text.starts_with("ST LONG"));
+    }
+
+    #[test]
+    fn st_flip_markers_handle_none_gaps() {
+        let ts: Vec<i64> = (0..5).collect();
+        let close = vec![100.0; 5];
+        // A None gap between opposite directions still counts as a flip
+        // (prev carries across the gap).
+        let dir = [Some(1), None, Some(-1), None, Some(-1)];
+        let m = st_flip_markers(&ts, &close, &dir);
+        assert_eq!(m.len(), 1);
+        assert_eq!(m[0].time, 2);
+    }
+
+    #[test]
+    fn qtrend_precursor_markers_are_circles() {
+        use crate::indicators::trend::QTrend;
+        let n = 6;
+        let mut qt = QTrend {
+            line: vec![None; n],
+            dir: vec![Some(-1); n], // downtrend → pending BUY
+            flip: vec![None; n],
+            strong: vec![false; n],
+            dist_flip_atr: vec![Some(2.0); n],
+        };
+        qt.dist_flip_atr[3] = Some(0.3);
+        let close = vec![10.0, 9.0, 8.0, 8.5, 8.6, 8.7]; // rising into bar 3
+        let ts: Vec<i64> = (0..n as i64).collect();
+
+        let m = qtrend_precursor_markers(&ts, &close, &qt, 0.5);
+        assert_eq!(m.len(), 1);
+        assert_eq!(m[0].time, 3);
+        assert_eq!(m[0].shape, "circle");
+        assert_eq!(m[0].position, "belowBar");
     }
 
     #[test]
