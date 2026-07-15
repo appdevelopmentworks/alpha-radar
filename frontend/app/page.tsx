@@ -146,14 +146,20 @@ export default function Home() {
       </header>
 
       <section className="ticker-input">
-        <label htmlFor="tickers">複数のティッカーを入力（カンマ・スペース・改行区切り）</label>
+        <label htmlFor="tickers">
+          複数のティッカーを入力（カンマ・スペース区切り、Enter で実行 / 改行は Shift+Enter）
+        </label>
         <div className="ticker-row">
           <textarea
             id="tickers"
             value={lastInput}
             onChange={(e) => setLastInput(e.target.value)}
             onKeyDown={(e) => {
-              if ((e.ctrlKey || e.metaKey) && e.key === "Enter") onScanTickers();
+              // Plain Enter runs the scan (Shift+Enter inserts a newline).
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                onScanTickers();
+              }
             }}
             placeholder="AAPL, MSFT, 7974.T, BTC-USD"
             disabled={scanning}

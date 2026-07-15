@@ -111,7 +111,8 @@
 ---
 
 ## ADR-16 ST フリップ表示レイヤー + 直近マーカー列 + 動的ペイン/ウインドウ追従
-- **決定1（ST フリップ）:** Supertrend の方向フリップに `ST LONG / ST SHORT` マーカーを表示するトグル「STフリップ」を追加（**既定 OFF**）。TradingView の Adaptive Trend Sentinel の Long/Short ラベルに相当する**視覚比較専用**レイヤー。ATS はクローズドソースのため正確な複製は不可能で、同型の ATR トレーリングストップ＝既存 Supertrend を流用する。**単独エッジは実測でなし**（ADR-14 規則B: hit10 50.3% / PF10 1.01）— エントリー規則は引き続き ADR-14 の合流マーカー。
+- **決定1（ST フリップ）:** Supertrend の方向フリップに `ST LONG / ST SHORT` マーカーを表示するトグル「STフリップ」を追加。TradingView の Adaptive Trend Sentinel の Long/Short ラベルに相当する**視覚比較専用**レイヤー。ATS はクローズドソースのため正確な複製は不可能で、同型の ATR トレーリングストップ＝Supertrend で近似する。**単独エッジは実測でなし**（ADR-14 規則B: hit10 50.3% / PF10 1.01）— エントリー規則は引き続き ADR-14 の合流マーカー。
+  - **追記（パラメータ分離）:** スコアリング用 Supertrend（10 / 3.0）を流用すると ATS（ステータス行 "2 10"）よりフリップが遅く・少なくなりタイミングがずれるため、表示専用の **`stflip_atr` / `stflip_mult`（既定 10 / 2.0）** を新設し別計算とした。スコア・確定マーカーへの影響なし。既定トグルはユーザー指定により **ON**（初期ビュー: EMAリボン/MACD/Squeeze/Q-Trend/QT前兆/STフリップ）。
 - **決定2（直近マーカー列）:** レーダーに「直近マーカー」列を追加。確定（ADR-14）/ QTフリップ / QT前兆の**全種から最新1件**を種別×方向の配色バッジ＋経過（本日/N日前、営業日ベース）で表示し、経過日数でソート可（既定昇順=新しい順）。同一バーのタイブレークは 確定 > QTフリップ > 前兆。`SymbolScore.last_marker`（`{kind, dir, bars_ago}`）として算出・`scores` テーブルへ追加移行（ALTER TABLE 追加パターン）。
 - **決定3（レイアウト）:** チャートはウインドウ追従（`.chart-page` 100vh フレックス + `.chart-host` flex:1、`autoSize` 追従）。ペイン高さは `setStretchFactor` で動的化 — MACD/Squeeze/スコアの OFF でペインを 2px まで収縮し価格ペインが残余を吸収（`setHeight` は最小30pxクランプ+兄弟再膨張のため**使用禁止**）。「スコア」トグル新設。`layout.panes.enableResize: false` でセパレータドラッグとの競合を防止。ADR-14 時代の「固定4段の割り切り」は本決定で置換（ズームは維持される — ペイン構造不変・factor 変更のみ）。
 

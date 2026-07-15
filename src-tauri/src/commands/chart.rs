@@ -313,6 +313,9 @@ pub fn build_chart_data(
         p.qtrend_atr,
         p.qtrend_mult,
     );
+    // ST-flip display layer uses its own (tighter, ATS-like) Supertrend; the
+    // scoring/ADR-14 `st` above stays on supertrend_atr/mult (ADR-16).
+    let st_flip = supertrend(&high, &low, &close, p.stflip_atr, p.stflip_mult);
 
     Ok(ChartData {
         ema20: tv(&ts, &ribbon.fast),
@@ -341,7 +344,7 @@ pub fn build_chart_data(
         qtrend: tv(&ts, &qt.line),
         qt_markers: qtrend_flip_markers(&ts, &close, &qt),
         qt_precursors: qtrend_precursor_markers(&ts, &close, &qt, p.qtrend_precursor_atr),
-        st_markers: st_flip_markers(&ts, &close, &st.dir),
+        st_markers: st_flip_markers(&ts, &close, &st_flip.dir),
         mtf_summary: mtf_summary(cache, symbol, cfg)?,
         initial_bars: cfg.chart_bars,
         ohlc: candles,

@@ -38,6 +38,13 @@ pub struct IndicatorParams {
     /// pending flip threshold while moving toward it (ADR-15).
     #[serde(default = "default_qtrend_precursor_atr")]
     pub qtrend_precursor_atr: f64,
+    /// ST-flip display layer (ADR-16): its own Supertrend params so the marker
+    /// timing approximates ATS (its status line reads "2 10" ⇒ mult 2 ×
+    /// ATR 10) without touching the scoring/ADR-14 Supertrend (10 / 3.0).
+    #[serde(default = "default_stflip_atr")]
+    pub stflip_atr: usize,
+    #[serde(default = "default_stflip_mult")]
+    pub stflip_mult: f64,
     // momentum
     pub macd_fast: usize,
     pub macd_slow: usize,
@@ -81,6 +88,8 @@ impl Default for IndicatorParams {
             qtrend_atr: default_qtrend_atr(),
             qtrend_mult: default_qtrend_mult(),
             qtrend_precursor_atr: default_qtrend_precursor_atr(),
+            stflip_atr: default_stflip_atr(),
+            stflip_mult: default_stflip_mult(),
             macd_fast: 12,
             macd_slow: 26,
             macd_signal: 9,
@@ -121,6 +130,14 @@ fn default_qtrend_mult() -> f64 {
 /// Precursor default: within half an ATR of the pending flip threshold.
 fn default_qtrend_precursor_atr() -> f64 {
     0.5
+}
+/// ST-flip display defaults approximate ATS's visible inputs ("2 10"):
+/// a tighter band than the scoring Supertrend, flipping earlier and oftener.
+fn default_stflip_atr() -> usize {
+    10
+}
+fn default_stflip_mult() -> f64 {
+    2.0
 }
 
 /// Regime-dependent category weights (docs/03 §3). Columns are indexed by
