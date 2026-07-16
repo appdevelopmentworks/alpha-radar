@@ -105,13 +105,20 @@ jobs:
           path: dist
 
       # `gh` is preinstalled on every runner; using it directly avoids depending
-      # on a third-party release action's input names.
-      - name: Create the GitHub Release
+      # on a third-party release action's input names. Idempotent: creating a
+      # release in the UI also publishes the tag, which re-triggers this
+      # workflow — so if the release already exists, just attach/refresh the
+      # installers (--clobber) without touching its title/notes.
+      - name: Publish the GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
-            --title "Alpha Radar $GITHUB_REF_NAME" \
-            --notes-file .github/release-notes.md \
-            dist/*/*
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/*/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --title "Alpha Radar $GITHUB_REF_NAME" \
+              --notes-file .github/release-notes.md \
+              dist/*/*
+          fi
