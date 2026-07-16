@@ -52,6 +52,19 @@ jobs:
         working-directory: frontend
         run: npm run build
 
+      # tauri-build validates that every externalBin exists whenever the crate
+      # COMPILES (even `cargo test`/`clippy`), so it would otherwise need the
+      # ~41MB PyInstaller sidecar. The unit/golden tests never spawn it (the
+      # sidecar tests are #[ignore]), so a zero-byte placeholder at the expected
+      # path satisfies the check and keeps CI fast. The real sidecar is built
+      # only in release.yml.
+      - name: Placeholder sidecar (externalBin existence check)
+        shell: pwsh
+        run: |
+          $triple = (& rustc -vV | Select-String 'host:').ToString().Split(' ')[-1]
+          New-Item -ItemType Directory -Force src-tauri/binaries | Out-Null
+          New-Item -ItemType File -Force "src-tauri/binaries/fetch-$triple.exe" | Out-Null
+
       - name: cargo test (golden values)
         run: cargo test --manifest-path src-tauri/Cargo.toml
 
