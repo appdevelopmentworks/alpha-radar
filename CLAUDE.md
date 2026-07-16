@@ -98,11 +98,17 @@ alpha-radar/
 # run sidecar manually (dev)   : uv run --project sidecar python sidecar/fetch.py   (stdin: JSON request)
 # bundle sidecar (PyInstaller) : pwsh tools/package-sidecar.ps1   (then `cargo tauri build`)
 # package installer (NSIS)     : pwsh tools/package-sidecar.ps1; cargo tauri build --bundles nsis
+# frontend lint/typecheck      : npm run lint; npx tsc --noEmit    (in frontend/ — the CI gate)
+# release (installers via CI)  : bump tauri.conf.json version; git tag v0.1.0; git push origin v0.1.0
 ```
 
 ## Packaging
 
 `tools/package-sidecar.ps1` builds `sidecar/fetch.py` into a one-file exe (PyInstaller, `--collect-all yfinance`, ~41 MB) and copies it to `src-tauri/binaries/fetch-<target-triple>.exe`. `tauri.conf.json` registers `bundle.externalBin = ["binaries/fetch"]`, so `cargo tauri build` bundles it next to the app exe (Tauri strips the triple → `fetch.exe`). `SidecarClient::resolve()` spawns the bundled `fetch*` next to the running exe in production, else falls back to `uv run` in dev. `src-tauri/binaries/` is gitignored (per-platform build artifact). Verified: the release app launches standalone (embedded frontend, no dev server) and the bundled exe fetches via yfinance.
+
+**Changing the sidecar requires rebuilding the exe** — editing `fetch.py` alone does not affect a bundled build (dev falls back to `uv run` only when no `fetch*` sits next to the running exe).
+
+**CI** (`.github/workflows/`): `ci.yml` (push/PR, windows-latest) runs frontend lint/typecheck/export then `cargo test` + `clippy -D warnings`. `release.yml` (tag `v*` / `workflow_dispatch`) builds the sidecar per-OS via the same ps1 (it is platform-parameterized) and bundles NSIS on windows-latest + an **arm64 .dmg on macos-latest** (Apple Silicon only, **unsigned** — ADR-18; users need `xattr -dr com.apple.quarantine`). Cross-compiling macOS from Windows is impossible (Tauri needs the macOS SDK; PyInstaller embeds the host's Python).
 
 ## Pinned versions / tooling (session 1)
 
@@ -110,4 +116,4 @@ alpha-radar/
 - **Frontend**: Next.js 16.2.9 (App Router, `output: 'export'`), React 19.2.4, TypeScript 5. Frontend lives in `frontend/`; package manager is npm.
 - **Rust**: edition 2021, toolchain stable (1.96) pinned via `rust-toolchain.toml`.
 - **Golden reference**: TA-Lib 0.6.8 via a uv-managed Python 3.12 env under `tools/golden/` (test-time only — NOT the P0 runtime sidecar). pandas-ta 0.3.14b0 was yanked from PyPI, so TA-Lib (named first in ADR-13) is the numeric basis. ATR is pinned to TA-Lib's Wilder seed; this differs from TradingView only in warm-up (signal-irrelevant), per docs/02.
-- **App icon**: source `docs/icon.png` (1254² square); regenerate with `cargo tauri icon docs/icon.png`.
+- **App icon**: source `docs/icon.png` (1254² square); regenerate with `cargo tauri icon docs/icon.png`. The in-app header logo is a **copy** of the generated `src-tauri/icons/128x128.png` at `frontend/public/logo.png` — regenerating the icon must refresh both.

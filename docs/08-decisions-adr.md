@@ -118,6 +118,18 @@
 
 ---
 
+## ADR-17 UI 状態の永続化 = `config.json` とは別ファイル（`ui_prefs.json`・Rust 側は不透明保持）
+- **決定:** チャートの表示トグル（`ChartVisibility` 10個）は `app_data_dir/ui_prefs.json` に保存し、次回起動時に復元する。Rust は `serde_json::Value` として**スキーマを解釈せず**読み書きする（`get_ui_prefs` / `update_ui_prefs`）。スキーマの所有はフロントエンド（`lib/ui-prefs.ts`）。**足種（tf）とレーダーのソート/フィルタは永続化しない**（セッション限り）。
+- **根拠:** `ScanConfig` は毎スキャン `scan_runs.config_json` に**スナップショットされる再現性の監査記録**（ADR-10）であり、装飾的な表示フラグを混ぜると監査記録が汚れ、`/settings` の往復スキーマも変わる（かつ `Copy` 制約もある）。表示フラグは**計算ではない**ため ADR-06「Rust が計算の単一真実源」は及ばない。トグルは実績として3度増えており（ADR-15/16 で `score`/`qtPrecursor`/`stFlip`）、不透明保持なら追加時に Rust 変更が不要。`indicators`/`regime`/`weights` を `Record<string, unknown>` で素通しする既存の前例と同型。検索語を永続化しないのは、前回の絞り込みが残ってリストが空に見える事故を避けるため。
+- **帰結:** 読み込みは寛容（**既知キーかつ boolean のみ採用**、不明キー無視、新トグルは既定、破損時は既定へ縮退、不在は `null`）。書き込み失敗は UI に出さず `console.warn` のみ。ハイドレーション中のユーザー操作は `DEFAULT_VISIBILITY` の**参照同一性**で判定して上書きしない（`useState({...DEFAULT_VISIBILITY})` に変えると壊れる）。**`ScanConfig` に UI 状態を足さないこと。**
+
+## ADR-18 macOS 配布 = arm64 単体 `.dmg`・未署名（universal 化は不可能）
+- **決定:** リリース CI は `macos-latest`（Apple Silicon）で **arm64 の `.dmg` を1本**生成する。`--target universal-apple-darwin` は採用しない。署名・公証は行わない。Windows は NSIS。Linux は対象外。
+- **根拠:** **サイドカーを universal 化できない** — PyInstaller の `--target-arch universal2` は universal2 のインタプリタと全ネイティブ依存（pandas 等）の universal2 wheel を要求するが、uv 管理の python-build-standalone は単一アーキ（「Python は uv のみ」はプロジェクト規約）。また one-file バイナリ2本の `lipo` 統合も**不可**（PyInstaller が Mach-O イメージの外に追記する CArchive が失われ、起動できないバイナリになる）。よって Intel 対応は universal ではなく **`macos-13` ランナーによる2本目の dmg**（必要になれば matrix に1行追加）。Windows からのクロスビルドは Tauri（macOS SDK 必須）・PyInstaller の双方で原理的に不可能。
+- **帰結:** Intel Mac は非対応。未署名のため Gatekeeper 回避が必要 — **特に同梱サイドカー（`fetch`）にも個別に隔離属性が付き、「このまま開く」だけではアプリは起動してもスキャンが必ず失敗する**ため、`xattr -dr com.apple.quarantine` を **`.app` ツリー全体**に適用する必要がある（README / `.github/release-notes.md` に明記）。正式対応は Apple Developer Program（$99/年）+ Developer ID 署名/公証。
+
+---
+
 ## 拡張点（v1 スコープ外・設計上確保）
 - 取引所ネイティブ暗号資産（Binance/Bitbank・非標準足）= データプロバイダのプラグイン追加。
 - 日中足版（1h は730日取得可）= 短期トレード用プリセット。

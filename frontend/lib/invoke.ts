@@ -5,6 +5,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
 import type { ChartData, ScanConfig, ScanResult, Tf } from "./types";
+import type { UiPrefs } from "./ui-prefs";
 
 /** The active (persisted) scan configuration, else the tuned Standard preset. */
 export function getConfig(): Promise<ScanConfig> {
@@ -14,6 +15,20 @@ export function getConfig(): Promise<ScanConfig> {
 /** Persist a new active scan configuration. */
 export function updateConfig(config: ScanConfig): Promise<void> {
   return invoke("update_config", { config });
+}
+
+/**
+ * The persisted UI preferences blob (chart toggles); `null` when never saved.
+ * Typed `unknown` on purpose — the file is untrusted input, and only
+ * `visibilityFromPrefs` (ui-prefs.ts) may interpret it.
+ */
+export function getUiPrefs(): Promise<unknown> {
+  return invoke<unknown>("get_ui_prefs");
+}
+
+/** Persist the UI preferences blob (view state only — never the scan config). */
+export function updateUiPrefs(prefs: UiPrefs): Promise<void> {
+  return invoke("update_ui_prefs", { prefs });
 }
 
 /** Named presets: [label, config][] (conservative / standard / aggressive). */

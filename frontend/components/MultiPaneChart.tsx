@@ -76,10 +76,14 @@ export function MultiPaneChart({
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const seriesRef = useRef<Refs>(null);
-  // Latest visibility, read by the (async) chart-creation effect for its
-  // initial state without making `visible` a dependency (which would rebuild).
+  // Latest visibility, read by the (async) chart-creation effect for its initial
+  // state and by the long-lived ResizeObserver — without making `visible` a
+  // dependency of either (which would rebuild the chart). Synced in an effect,
+  // not during render: refs must not be written while rendering.
   const visibleRef = useRef(visible);
-  visibleRef.current = visible;
+  useEffect(() => {
+    visibleRef.current = visible;
+  });
 
   // Create the chart + all series once per `data`. Toggling checkboxes does NOT
   // run this effect, so it never rebuilds/resizes the chart.

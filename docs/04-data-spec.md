@@ -162,7 +162,7 @@ for symbol in universe:
 
 - **P0 サイドカー**: `sidecar/fetch.py`（uv 管理・yfinance、stdin/stdout JSON、`auto_adjust`、リトライ/指数バックオフ、構造化エラー）。実データで round-trip 検証済み（AAPL 1d / 7974.T 1wk / BTC-USD 1mo / 不正銘柄=errors）。`sidecar/mock_fetch.py` はネットワーク非依存のモック。Rust 側は `src-tauri/src/data/sidecar.rs`（`SidecarClient`、コマンド注入式）。
   - 現状は**1プロセス内で銘柄ごとに逐次取得**（プロセスレベルのバッチは満たす）。`yf.download` のまとめ取得・`output="parquet"`・`Ticker.info` 名称補完は将来最適化。
-  - **パッケージング（PyInstaller バンドル + `tauri.conf.json` の `externalBin` 登録）は未了**。dev は `uv run --project sidecar python sidecar/fetch.py` で起動（`SidecarClient::dev_uv`）。
+  - **パッケージング済み**: `pwsh tools/package-sidecar.ps1` が PyInstaller で単一バイナリ化し `src-tauri/binaries/fetch-<triple>[.exe]` へ配置 → `tauri.conf.json` の `bundle.externalBin` がバンドルに同梱。`SidecarClient::resolve()` は**実行ファイルの隣の `fetch*` を優先**し、無ければ dev（`uv run --project sidecar python sidecar/fetch.py` = `SidecarClient::dev_uv`）へフォールバック。CI（`.github/workflows/release.yml`）が OS 別にビルド（docs/01、ADR-18）。**サイドカーを変更したら exe の再ビルドが必要**（`.py` 修正だけではバンドル版に反映されない）。
 - **P4 取込/キャッシュ/スキャン**: `data/csv.rs`（寛容パース・行エラー）、`data/cache.rs`（rusqlite bundled、上記 DDL、差分更新 `FetchDecision::{Full,From,Skip}`、OHLCV upsert、`scores`/`scan_runs` 保存。**追加列は `Cache::open` 内の加算的マイグレーション**（`pragma_table_info` で欠損列を `ALTER TABLE ADD COLUMN` — 既存 DB は旧行 NULL のまま利用継続）で反映）、`data/universe.rs`。`commands/scan_universe`（差分判定→1バッチ取得→upsert→メモリロード→**rayon 並列スコアリング**→`SymbolScore`→保存→`ScanResult`）。
   - キャッシュ（rusqlite `Connection`）は `!Sync` のため、DB アクセスは逐次・純粋スコアリングのみ rayon 並列。
   - `min_bars`（既定60）未満は `RowError`、上位足欠落は MTF ゲートで degrade（`docs/03`）。設定は `scan_runs.config_json` にスナップショット（ADR-10）。

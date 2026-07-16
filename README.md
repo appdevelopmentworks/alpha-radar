@@ -108,11 +108,34 @@ P8 — ウォークフォワード・チューニング（`eval/tuning.rs`、ADR
 | Rust | edition 2021 / toolchain stable（1.96） |
 | ゴールデン基準 | **TA-Lib 0.6.8**（uv 管理 Python 3.12、テスト時のみ）※ pandas-ta 0.3.14b0 が PyPI から取り下げのため、ADR-13 が第一に挙げる TA-Lib を採用 |
 
-- **アイコンソース**: `docs/icon.png`（1254² 正方形）→ `cargo tauri icon` で生成。
+- **アイコンソース**: `docs/icon.png`（1254² 正方形）→ `cargo tauri icon` で生成。アプリ内ヘッダー用に `frontend/public/logo.png`（`src-tauri/icons/128x128.png` のコピー）も使用 — **再生成時は両方更新**。
 - **追加依存**: Rust = `csv`・`rusqlite`(bundled)・`tauri-plugin-dialog`。フロント = `@tauri-apps/api`・`@tauri-apps/plugin-dialog`・`lightweight-charts` 5.2。サイドカー = `uv sync --project sidecar`（yfinance）。
 - **テスト**: Rust 単体 58 + ゴールデン 4 スイート + チャート結合 緑、`clippy` 警告ゼロ。`-- --ignored` でサイドカー round-trip / **実データ E2E**（`tests/e2e_live.rs`: scan→chart→eval→tune）。
-- **配布（パッケージング完了）**: `pwsh tools/package-sidecar.ps1`（PyInstaller で `fetch.py`→単一exe・`externalBin` 配置）→ `cargo tauri build --bundles nsis` で **NSIS インストーラ**生成（`Alpha Radar_0.1.0_x64-setup.exe`）。リリースアプリは**単体起動**（埋め込みフロント・dev サーバ不要）、`SidecarClient::resolve()` が同梱 `fetch.exe`/dev `uv` を自動判定。`src-tauri/binaries/` は gitignore（ビルド成果物）。
-- **次工程**: 評価/チューニングの **UI 露出**（現状はコマンド/JSON）、スキャン進捗イベントのストリーミング、評価ユニバースの拡充、CI（GitHub Actions）での OS 別サイドカービルド + リリース自動化（`docs/01` CI 節）。
+- **配布（パッケージング完了）**: `pwsh tools/package-sidecar.ps1`（PyInstaller で `fetch.py`→単一exe・`externalBin` 配置）→ `cargo tauri build --bundles nsis` で **NSIS インストーラ**生成（`Alpha Radar_0.1.0_x64-setup.exe`）。リリースアプリは**単体起動**（埋め込みフロント・dev サーバ不要）、`SidecarClient::resolve()` が同梱 `fetch.exe`/dev `uv` を自動判定。`src-tauri/binaries/` は gitignore（ビルド成果物）。**CI（GitHub Actions）で Windows/macOS のインストーラを自動生成**（下記「配布・インストール」）。
+- **次工程**: 評価/チューニングの **UI 露出**（現状はコマンド/JSON）、スキャン進捗イベントのストリーミング、評価ユニバースの拡充。
+
+## 配布・インストール
+
+インストーラは CI（`.github/workflows/release.yml`）が生成します。**未署名**のため初回起動時に OS の警告が出ます。
+
+| OS | 成果物 | 対象 |
+|---|---|---|
+| Windows | `Alpha Radar_*_x64-setup.exe`（NSIS） | x64。SmartScreen →「詳細情報」→「実行」 |
+| macOS | `Alpha Radar_*_aarch64.dmg` | **Apple Silicon（M1以降）専用**。Intel Mac 非対応（ADR-18） |
+
+**macOS は `xattr` の実行が必須**（省略するとアプリは起動してもスキャンが必ず失敗します）:
+
+```sh
+xattr -dr com.apple.quarantine "/Applications/Alpha Radar.app"
+```
+
+> 「開発元を確認できません」を「このまま開く」で回避してもアプリ本体は起動しますが、**同梱のデータ取得プロセス（`fetch`）には隔離属性が残ったまま**で、スキャン時に Gatekeeper に停止され `sidecar error` になります。上記は `.app` 内すべての隔離属性を解除します。恒久対応は Apple Developer Program（$99/年）による署名・公証。
+
+### リリース手順
+
+1. `src-tauri/tauri.conf.json` の `version` を更新（**git タグとは独立** — インストーラ名になります）。
+2. `git tag v0.1.0 && git push origin v0.1.0` → CI が Windows/macOS のインストーラをビルドし GitHub Release に添付。
+3. タグを切らずに試す場合: Actions →「Release」→ Run workflow（アーティファクトのみ生成。**デフォルトブランチに存在する時のみ**手動実行可）。
 
 ### 開発コマンド
 

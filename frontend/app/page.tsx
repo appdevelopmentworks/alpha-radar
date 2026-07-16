@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 
+import Image from "next/image";
 import Link from "next/link";
 
 import { listen } from "@tauri-apps/api/event";
@@ -128,9 +129,14 @@ export default function Home() {
   return (
     <main className="scanner">
       <header className="app-header">
-        <div>
-          <h1>Alpha Radar</h1>
-          <span className="subtitle">Swing Entry Confluence Scanner</span>
+        <div className="app-title">
+          {/* Decorative (alt=""): the adjacent h1 already carries the name.
+              Source: a copy of src-tauri/icons/128x128.png (see CLAUDE.md). */}
+          <Image src="/logo.png" alt="" width={40} height={40} className="app-logo" />
+          <div>
+            <h1>Alpha Radar</h1>
+            <span className="subtitle">Swing Entry Confluence Scanner</span>
+          </div>
         </div>
         <div className="header-actions">
           {result && (

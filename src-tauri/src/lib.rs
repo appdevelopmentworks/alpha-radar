@@ -41,6 +41,8 @@ pub fn run() {
             commands::scan_symbols,
             commands::get_config,
             commands::update_config,
+            commands::get_ui_prefs,
+            commands::update_ui_prefs,
             commands::get_presets,
             commands::get_chart_data,
             commands::evaluate_model

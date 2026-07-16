@@ -404,6 +404,36 @@ pub fn update_config(app: tauri::AppHandle, config: ScanConfig) -> Result<(), Ap
     Ok(())
 }
 
+/// Load the persisted UI preferences blob (chart toggles, …). The schema is
+/// owned by the frontend and stored opaquely: these are view flags, not
+/// computation, so ADR-06 does not apply, and adding a toggle needs no Rust
+/// change (ADR-17). Deliberately NOT part of `ScanConfig` — that struct is
+/// snapshotted into every `scan_runs.config_json` row (ADR-10) and must stay
+/// purely computational.
+///
+/// Returns `null` when absent or unreadable: a missing or corrupt prefs file
+/// must never block startup (same silent-fallback contract as
+/// `load_active_config`); the frontend falls back to its defaults.
+#[tauri::command]
+pub fn get_ui_prefs(app: tauri::AppHandle) -> serde_json::Value {
+    app_data_dir(&app)
+        .ok()
+        .map(|d| d.join("ui_prefs.json"))
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or(serde_json::Value::Null)
+}
+
+/// Persist the UI preferences blob (docs/05, ADR-17). A separate file from
+/// `config.json` so view state never enters the scan config or its audit
+/// snapshot.
+#[tauri::command]
+pub fn update_ui_prefs(app: tauri::AppHandle, prefs: serde_json::Value) -> Result<(), AppError> {
+    let path = app_data_dir(&app)?.join("ui_prefs.json");
+    std::fs::write(path, serde_json::to_string_pretty(&prefs)?)?;
+    Ok(())
+}
+
 /// Return the named presets (Conservative / Standard / Aggressive) for the
 /// settings screen.
 #[tauri::command]
