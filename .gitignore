@@ -26,13 +26,15 @@ sidecar/dist/
 *.spec
 
 # ---- Data / cache (never commit) ----
+# NOTE: anchor these to the repo root — an unanchored `data/` also matched the
+# `src-tauri/src/data/` SOURCE module and silently kept it out of git.
 *.db
 *.sqlite
 *.sqlite3
 *.duckdb
 *.parquet
-data/
-cache/
+/data/
+/cache/
 
 # ---- Env / secrets ----
 .env
